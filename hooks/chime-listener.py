@@ -191,6 +191,12 @@ def make_handler(sounds_dir, config, player, log):
                 except OSError:
                     pass
 
+            # Health check used by install-listener.sh. Answered without
+            # playing anything, so verifying the agent is up is silent.
+            if line.strip() == "ping":
+                ack(b"pong")
+                return
+
             try:
                 event, theme, label = parse_message(line, list_themes(sounds_dir))
             except ChimeError as exc:

@@ -82,7 +82,14 @@ for p in ('$PLUGIN_ROOT/config.json', os.path.expanduser('~/.claude/claw-bell.js
 print(cfg.get('chime_port', 8127))
 ")
 
-if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
+# Ping rather than a bare port probe: it confirms the listener is actually
+# answering, not merely that something holds the port, and it stays silent.
+PONG=$(exec 3<>"/dev/tcp/127.0.0.1/$PORT" 2>/dev/null \
+       && printf 'ping\n' >&3 \
+       && { read -t 3 -r reply <&3; echo "$reply"; } \
+       && exec 3>&-)
+
+if [ "$PONG" = "pong" ]; then
     echo "claw-bell listener running on 127.0.0.1:$PORT"
     echo "  plist: $PLIST"
     echo "  log:   $LOG"

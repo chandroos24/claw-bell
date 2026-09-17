@@ -243,6 +243,18 @@ class EndToEnd(unittest.TestCase):
     def test_acks_garbage_rather_than_stalling(self):
         self.assertEqual(self.exchange("nonsense\n"), b"err\n")
 
+    def test_ping_answers_pong(self):
+        self.assertEqual(self.exchange("ping\n"), b"pong\n")
+
+    def test_ping_plays_nothing(self):
+        self.exchange("ping\n")
+        time.sleep(0.2)
+        self.assertEqual(self.player.played, [])
+
+    def test_ping_is_not_logged_as_a_rejection(self):
+        self.exchange("ping\n")
+        self.assertFalse(any("rejected" in line for line in self.logs))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -194,7 +194,59 @@ python3 generate_sounds.py --speech-only
 | WSL | `powershell.exe` via `System.Media.SoundPlayer` |
 | macOS | `afplay` |
 | Linux | `aplay`, falling back to `paplay` |
-| SSH | Terminal bell (`\a`) — dignity preserved |
+| SSH | Forwarded to a listener on your workstation, falling back to the terminal bell (`\a`) |
+
+## Remote sessions over SSH
+
+A Claude Code session on a headless server has no speakers. Rather than settle
+for a terminal bell, the hook sends the *intent* back over the SSH connection
+you already have open, and your workstation plays the sound. No audio crosses
+the wire, and nothing listens on a public interface.
+
+```
+server: hook ──"stop|dnd|s1"──> 127.0.0.1:8127 ══tunnel══> workstation: listener ──> 🔊
+```
+
+See [docs/architecture.md](docs/architecture.md) for the full design.
+
+**On the workstation** (macOS), install the plugin, then start the listener:
+
+```bash
+bash "$(claude plugin list --json | python3 -c 'import json,sys; print(next(p["installPath"] for p in json.load(sys.stdin) if p["id"].startswith("bells-and-whistles@")))')/hooks/install-listener.sh"
+```
+
+It installs a launchd agent that survives reboots. Re-run it after
+`claude plugin update` — install paths are versioned, so the agent needs
+repointing at the new one.
+
+**In `~/.ssh/config`**, tunnel the port for each server:
+
+```
+Host myserver
+    RemoteForward 8127 127.0.0.1:8127
+```
+
+Leave `ExitOnForwardFailure` at its default of `no`. A second concurrent
+session to the same host cannot re-bind the port there; it should carry on and
+reuse the first session's tunnel rather than refuse to connect.
+
+**On each machine**, give it its own theme so you can tell who wants you
+without looking. Put per-host settings in `~/.claude/claw-bell.json`, which is
+layered over the plugin's `config.json` and survives plugin updates:
+
+```json
+{
+  "theme": "dnd",
+  "chime_label": "s1",
+  "chime_port": 8127
+}
+```
+
+Servers need nothing installed beyond the plugin itself — the send uses bash's
+`/dev/tcp` builtin. If the tunnel is down, the listener is stopped, or the
+workstation is asleep, the hook rings the terminal bell exactly as before.
+
+Check `~/Library/Logs/claw-bell.log` on the workstation to see what arrived.
 
 ## Regenerating sounds
 
