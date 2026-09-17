@@ -42,11 +42,20 @@ MUTE_DIR="${PLUGIN_ROOT}/.."
 [ -f "$MUTE_DIR/.mute_all" ] && exit 0
 
 # Read config (defaults: theme=beeps, mode=sound_and_voice, accent=us, gender=male, voice_style=full_sentence)
+# ~/.claude/claw-bell.json is layered on top of config.json so per-host settings
+# (notably the theme that identifies this machine) survive a plugin update.
 CONFIG="$PLUGIN_ROOT/config.json"
-if [ -f "$CONFIG" ]; then
-    eval "$(python3 -c "
+CONFIG_OVERRIDE="$HOME/.claude/claw-bell.json"
+eval "$(python3 -c "
 import json, shlex, sys
-c = json.load(open(sys.argv[1]))
+c = {}
+for p in sys.argv[1:]:
+    try:
+        d = json.load(open(p))
+    except Exception:
+        continue
+    if isinstance(d, dict):
+        c.update(d)
 print(f'THEME={shlex.quote(c.get(\"theme\",\"beeps\"))}')
 print(f'MODE={shlex.quote(c.get(\"mode\",\"sound_and_voice\"))}')
 print(f'ACCENT={shlex.quote(c.get(\"accent\",\"us\"))}')
@@ -54,14 +63,16 @@ print(f'GENDER={shlex.quote(c.get(\"gender\",\"male\"))}')
 print(f'VOICE_STYLE={shlex.quote(c.get(\"voice_style\",\"full_sentence\"))}')
 print(f'USE_THEMED_PHRASES={shlex.quote(str(c.get(\"use_themed_phrases\",False)).lower())}')
 print(f'WSL_POWERSHELL_PATH={shlex.quote(c.get(\"wsl_powershell_path\",\"\"))}')
-" "$CONFIG" 2>/dev/null)"
-fi
+print(f'CHIME_PORT={shlex.quote(str(c.get(\"chime_port\",8127)))}')
+print(f'CHIME_LABEL={shlex.quote(c.get(\"chime_label\",\"\"))}')
+" "$CONFIG" "$CONFIG_OVERRIDE" 2>/dev/null)"
 THEME="${THEME:-beeps}"
 MODE="${MODE:-sound_and_voice}"
 ACCENT="${ACCENT:-us}"
 GENDER="${GENDER:-male}"
 VOICE_STYLE="${VOICE_STYLE:-full_sentence}"
 USE_THEMED_PHRASES="${USE_THEMED_PHRASES:-false}"
+CHIME_PORT="${CHIME_PORT:-8127}"
 
 SOUNDS_DIR="$PLUGIN_ROOT/sounds"
 
@@ -155,8 +166,34 @@ if [ "$PLAT" = "wsl" ]; then
     fi
 fi
 
-# SSH fallback: just bell (skip for WSL — SSH_CONNECTION is always set)
+# SSH: hand the chime to the listener on the workstation (skip for WSL —
+# SSH_CONNECTION is always set there). The listener is reached over
+# `RemoteForward <port> 127.0.0.1:<port>` in the client's ~/.ssh/config, and it
+# picks and plays the WAVs on that machine, so no audio crosses the wire.
+# /dev/tcp is a bash builtin — this needs no nc, no python, nothing installed.
+# Any failure (no tunnel, listener down, workstation asleep) degrades to the
+# terminal bell, which is what this branch did before.
 if [ -n "$SSH_CONNECTION" ] && [ "$PLAT" != "wsl" ]; then
+    if [ "$1" = "stop" ]; then
+        CHIME_EVENT="stop"
+    else
+        CHIME_EVENT="notification"
+    fi
+
+    [ -z "$CHIME_LABEL" ] && CHIME_LABEL=$(hostname -s 2>/dev/null || hostname 2>/dev/null)
+    CHIME_LABEL=$(printf '%s' "$CHIME_LABEL" | tr -cd 'A-Za-z0-9._-' | cut -c1-64)
+    [ -z "$CHIME_LABEL" ] && CHIME_LABEL="unknown"
+
+    # Cap the connect so a black-holed tunnel can never hang the hook.
+    CHIME_TIMEOUT=""
+    command -v timeout >/dev/null 2>&1 && CHIME_TIMEOUT="timeout 2"
+
+    CHIME_SEND='exec 3<>/dev/tcp/127.0.0.1/"$CHIME_PORT" && printf "%s\n" "$CHIME_MSG" >&3 && exec 3>&-'
+    if CHIME_MSG="${CHIME_EVENT}|${THEME}|${CHIME_LABEL}" CHIME_PORT="$CHIME_PORT" \
+       $CHIME_TIMEOUT bash -c "$CHIME_SEND" 2>/dev/null; then
+        exit 0
+    fi
+
     printf '\a'
     exit 0
 fi
