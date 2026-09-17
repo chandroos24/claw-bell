@@ -228,6 +228,21 @@ class EndToEnd(unittest.TestCase):
         self.send("stop|dnd|s1\n")
         self.assertEqual(len(self.player.played), 2)
 
+    def exchange(self, line):
+        """Send a line and return the listener's reply."""
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as sock:
+            sock.sendall(line.encode())
+            return sock.recv(16)
+
+    def test_acks_an_accepted_message(self):
+        self.assertEqual(self.exchange("stop|dnd|s1\n"), b"ok\n")
+
+    def test_acks_a_rejected_message_rather_than_stalling(self):
+        self.assertEqual(self.exchange("stop|../../etc|s1\n"), b"err\n")
+
+    def test_acks_garbage_rather_than_stalling(self):
+        self.assertEqual(self.exchange("nonsense\n"), b"err\n")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

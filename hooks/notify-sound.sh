@@ -188,7 +188,16 @@ if [ -n "$SSH_CONNECTION" ] && [ "$PLAT" != "wsl" ]; then
     CHIME_TIMEOUT=""
     command -v timeout >/dev/null 2>&1 && CHIME_TIMEOUT="timeout 2"
 
-    CHIME_SEND='exec 3<>/dev/tcp/127.0.0.1/"$CHIME_PORT" && printf "%s\n" "$CHIME_MSG" >&3 && exec 3>&-'
+    # Wait for the listener's one-word reply before closing. Without it, a
+    # session exiting right after the chime can tear the tunnel down while the
+    # line is still in flight, and the chime is silently lost.
+    # A failed connect or write must still exit non-zero so we fall back to the
+    # bell; the reply itself is best-effort, so its status is not checked.
+    CHIME_SEND='exec 3<>/dev/tcp/127.0.0.1/"$CHIME_PORT" || exit 1
+                printf "%s\n" "$CHIME_MSG" >&3 || exit 1
+                read -t 2 -r _ <&3
+                exec 3>&-
+                exit 0'
     if CHIME_MSG="${CHIME_EVENT}|${THEME}|${CHIME_LABEL}" CHIME_PORT="$CHIME_PORT" \
        $CHIME_TIMEOUT bash -c "$CHIME_SEND" 2>/dev/null; then
         exit 0

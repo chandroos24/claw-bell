@@ -36,6 +36,7 @@ srv.settimeout(10)
 conn, _ = srv.accept()
 data = conn.recv(256)
 open(out, "wb").write(data)
+conn.sendall(b"ok\n")   # the real listener acks; the sender waits for it
 conn.close()
 ' "$outfile" 2>/dev/null
 }
@@ -92,6 +93,38 @@ if [ "$elapsed" -le 5 ]; then
 else
     bad "no listener: returns promptly" "took ${elapsed}s"
 fi
+
+# --- the sender must block until the listener replies -----------------------
+# Regression: without this the hook can return while the line is still in
+# flight, and an ssh session exiting right then loses the chime entirely.
+RECV="$WORK/recv-ack"
+exec 4< <(python3 -c '
+import socket, sys, time
+out = sys.argv[1]
+srv = socket.socket()
+srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("127.0.0.1", 0))
+srv.listen(1)
+print(srv.getsockname()[1], flush=True)
+srv.settimeout(10)
+conn, _ = srv.accept()
+data = conn.recv(256)
+time.sleep(1.0)          # stall before acking
+open(out, "wb").write(data)
+conn.sendall(b"ok\n")
+conn.close()
+' "$RECV" 2>/dev/null)
+read -r PORT <&4
+start=$(date +%s)
+run_hook stop s1 dnd "$PORT" >/dev/null 2>&1
+waited=$(( $(date +%s) - start ))
+exec 4<&- 2>/dev/null
+if [ "$waited" -ge 1 ]; then
+    ok "waits for the listener's ack (${waited}s)"
+else
+    bad "waits for the listener's ack" "returned in ${waited}s, did not wait"
+fi
+check "ack path: wire format"     "stop|dnd|s1"    "$(cat "$RECV" 2>/dev/null | tr -d '\n')"
 
 # --- a muted session must stay silent, tunnel or no tunnel ------------------
 RECV="$WORK/recv-muted"

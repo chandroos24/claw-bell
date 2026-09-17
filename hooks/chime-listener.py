@@ -180,19 +180,33 @@ def make_handler(sounds_dir, config, player, log):
                 return
             line = raw.decode("ascii", errors="replace")
 
+            # The reply is what makes the send reliable: the sender blocks
+            # until it arrives, so an ssh session that exits right after
+            # chiming cannot tear the tunnel down before the line flushes.
+            # Every path answers, so the sender never waits out its timeout.
+            def ack(word):
+                try:
+                    self.wfile.write(word + b"\n")
+                    self.wfile.flush()
+                except OSError:
+                    pass
+
             try:
                 event, theme, label = parse_message(line, list_themes(sounds_dir))
             except ChimeError as exc:
                 log(f"rejected {line.strip()!r}: {exc}")
+                ack(b"err")
                 return
 
             tracks = resolve(sounds_dir, event, theme, config)
             if not tracks:
                 log(f"{label}: {event}/{theme} resolved to nothing to play")
+                ack(b"err")
                 return
 
             log(f"{label}: {event} -> {', '.join(t.name for t in tracks)}")
             player.submit(tracks, label)
+            ack(b"ok")
 
     return Handler
 
