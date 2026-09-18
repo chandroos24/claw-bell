@@ -280,7 +280,7 @@ Add to `~/.claude/claw-bell.json` on the workstation:
 ```json
 {
   "web_enabled": true,
-  "web_bind": "10.66.66.2",
+  "web_bind": ["127.0.0.1", "10.66.66.2"],
   "web_port": 8128,
   "presence_enabled": true,
   "idle_threshold": 300
@@ -290,17 +290,24 @@ Add to `~/.claude/claw-bell.json` on the workstation:
 | Key | Default | Meaning |
 |---|---|---|
 | `web_enabled` | `false` | serve the browser page at all |
-| `web_bind` | `127.0.0.1` | address to bind — set to your VPN address to reach the phone |
+| `web_bind` | `127.0.0.1` | address, or list of addresses, to bind — add your VPN address to reach the phone |
 | `web_port` | `8128` | HTTP port |
 | `presence_enabled` | `false` | gate local playback on whether you are at the Mac |
 | `idle_threshold` | `300` | seconds of inactivity before you count as away |
 
 Then re-run `install-listener.sh`; it prints the URL when the web server is on.
 
-**`web_bind` is never `0.0.0.0`.** Bind the one interface you want reachable.
-Set to a WireGuard or Tailscale address, VPN membership is the only
+**`web_bind` is never `0.0.0.0`.** Bind only the interfaces you want reachable.
+With a WireGuard or Tailscale address, VPN membership is the only
 authentication — there is no login, and the page reveals which hosts chimed and
 when.
+
+Give it a list including `127.0.0.1`. On macOS a WireGuard `utun` is
+point-to-point, so packets the Mac sends to its own tunnel address are routed
+*into* the tunnel rather than looped back — bind the VPN address alone and the
+Mac cannot open its own page, even though every peer can. An address that
+fails to bind is logged and skipped, so a VPN that is down does not take the
+local page with it.
 
 ### On the phone
 

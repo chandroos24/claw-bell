@@ -83,6 +83,46 @@ class SafePath(unittest.TestCase):
         self.assertIsNone(web.safe_sound_path(self.sounds, "dnd/absent.wav"))
 
 
+class MultiBind(unittest.TestCase):
+    """Binding several specific addresses, never 0.0.0.0."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.sounds = build_sounds(self.tmp.name)
+        self.page = Path(self.tmp.name) / "index.html"
+        self.page.write_text("<!doctype html><title>claw-bell</title>")
+        self.logs = []
+        self.b = broadcast.Broadcaster()
+        self.servers = []
+
+    def tearDown(self):
+        for s in self.servers:
+            s.shutdown()
+            s.server_close()
+        self.tmp.cleanup()
+
+    def test_unbindable_address_is_skipped_not_fatal(self):
+        self.servers = web.serve_many(
+            ["203.0.113.7", "127.0.0.1"], 0, self.sounds, self.b,
+            self.page, self.logs.append)
+        self.assertEqual(len(self.servers), 1)
+        self.assertEqual(self.servers[0].server_address[0], "127.0.0.1")
+        self.assertTrue(any("cannot bind 203.0.113.7" in m for m in self.logs))
+
+    def test_all_addresses_unbindable_is_survivable(self):
+        self.servers = web.serve_many(
+            ["203.0.113.7"], 0, self.sounds, self.b, self.page, self.logs.append)
+        self.assertEqual(self.servers, [])
+        self.assertTrue(any("no address could be bound" in m for m in self.logs))
+
+    def test_bound_server_actually_serves(self):
+        self.servers = web.serve_many(
+            ["127.0.0.1"], 0, self.sounds, self.b, self.page, self.logs.append)
+        port = self.servers[0].server_address[1]
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as r:
+            self.assertIn(b"claw-bell", r.read())
+
+
 class Server(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

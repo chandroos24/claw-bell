@@ -308,8 +308,11 @@ def main(argv=None):
     broadcaster = None
     if str(config.get("web_enabled", False)).lower() == "true":
         broadcaster = broadcast.Broadcaster()
-        chime_web.serve(
-            config.get("web_bind", "127.0.0.1"),
+        binds = config.get("web_bind", "127.0.0.1")
+        if isinstance(binds, str):
+            binds = [binds]
+        chime_web.serve_many(
+            binds,
             int(config.get("web_port", 8128)),
             sounds_dir,
             broadcaster,

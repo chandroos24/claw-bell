@@ -129,3 +129,27 @@ def serve(bind, port, sounds_dir, broadcaster, page_path, log, heartbeat=HEARTBE
     threading.Thread(target=server.serve_forever, daemon=True).start()
     log(f"web: serving on http://{bind}:{server.server_address[1]}")
     return server
+
+
+def serve_many(binds, port, sounds_dir, broadcaster, page_path, log,
+               heartbeat=HEARTBEAT_SECONDS):
+    """Bind several specific addresses rather than one, or 0.0.0.0.
+
+    On macOS a WireGuard utun is point-to-point: packets the Mac sends to its
+    own tunnel address are routed into the tunnel instead of looping back, so
+    binding only the VPN address leaves the machine unable to open its own
+    page. Binding loopback as well fixes that without exposing the LAN.
+
+    A bind that fails is logged and skipped — a VPN that is merely down must
+    not stop the local page from working.
+    """
+    servers = []
+    for bind in binds:
+        try:
+            servers.append(serve(bind, port, sounds_dir, broadcaster,
+                                 page_path, log, heartbeat))
+        except OSError as exc:
+            log(f"web: cannot bind {bind}:{port} ({exc}) — skipping")
+    if not servers:
+        log(f"web: no address could be bound on port {port}")
+    return servers
