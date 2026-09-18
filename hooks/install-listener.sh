@@ -111,9 +111,13 @@ for p in ('$PLUGIN_ROOT/config.json', os.path.expanduser('~/.claude/claw-bell.js
     except Exception:
         pass
 if str(cfg.get('web_enabled', False)).lower() == 'true':
-    print('http://%s:%s' % (cfg.get('web_bind', '127.0.0.1'), cfg.get('web_port', 8128)))
+    binds = cfg.get('web_bind', '127.0.0.1')
+    if isinstance(binds, str):
+        binds = [binds]
+    port = cfg.get('web_port', 8128)
+    print(' '.join('http://%s:%s' % (b, port) for b in binds))
 ")
-    [ -n "$WEB" ] && echo "  web:   $WEB"
+    for _url in $WEB; do echo "  web:   $_url"; done
 else
     echo "Agent loaded but nothing is listening on port $PORT." >&2
     echo "Check $LOG for the reason." >&2
