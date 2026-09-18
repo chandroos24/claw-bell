@@ -135,6 +135,12 @@ survives a listener restart and needs no control endpoint.
 The last row loses the chime deliberately: you are away from the Mac and have
 switched the phone off. It is logged so the log explains the silence.
 
+**Mute outranks everything.** The existing global and per-TTY mute checks run
+before any of this, on the sending host. A muted session sends nothing, so
+neither sink can play it and no event reaches the phone. Presence gating is
+independent of mute and applies only to chimes that were sent in the first
+place.
+
 ## Wire format
 
 SSE `data:` payload, one JSON object per event:
@@ -219,7 +225,7 @@ listening socket and no behaviour change.
 | `EventSource` drops | Auto-reconnects; no replay, so nothing stale fires |
 | Presence probe fails | Returns `True`, Mac plays — today's behaviour |
 | Slow phone client | Bounded per-client queue drops events; `afplay` never stalls |
-| **Phone `AllowedIPs` excludes 10.66.66.2** | Phone cannot reach the Mac at all. Not detectable from the Mac; see Open Questions |
+| Phone `AllowedIPs` too narrow | Would make the Mac unreachable from the phone. Confirmed not the case: the tunnel allows `10.66.66.0/24`, which covers `10.66.66.2` |
 | **Android VPN slot taken** | Resolved by using WireGuard, which already holds it |
 | **Samsung sleeping-apps eviction** | Tab or tunnel killed; surfaces as amber/red indicator |
 | **Android Doze** | Connection drops; reconnects on wake, no stale burst |
@@ -249,14 +255,12 @@ a public A record pointing at `10.66.66.2`. Public DNS pointing at a private
 address is ordinary and costs nothing. That upgrade is additive and does not
 change anything above.
 
-## Open questions
+## Resolved questions
 
-1. **Does the phone's WireGuard `AllowedIPs` include `10.66.66.0/24`, or only
-   the hub?** If only the hub, the phone cannot reach the Mac and nothing works
-   until it is widened. s1's WireGuard config requires root, so this could not
-   be verified from here — check the tunnel in the WireGuard Android app.
-2. Should the Mac also stop chiming when *muted* via the existing `/mute`, or
-   is presence gating independent of it? Current assumption: independent, both
-   apply, mute wins.
-3. Is 300 s the right idle threshold, or does it feel too slow to hand over to
-   the phone?
+1. **Phone reachability.** The phone's WireGuard tunnel allows
+   `10.66.66.0/24`, which covers the Mac at `10.66.66.2`. No config change
+   needed.
+2. **Mute precedence.** Mute wins, as specified under Routing policy. It is
+   enforced on the sending host, so a muted session never reaches either sink.
+3. **Idle threshold.** 300 s confirmed. Tunable via `idle_threshold` if the
+   handover to the phone feels too slow in practice.
