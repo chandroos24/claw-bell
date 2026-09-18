@@ -301,12 +301,16 @@ class PresenceRouting(unittest.TestCase):
         self.server = None
 
         class FakeBroadcaster:
-            def __init__(self, sink):
+            def __init__(self, sink, listeners=1):
                 self.sink = sink
+                self.listeners = listeners
 
             def publish(self, payload):
                 self.sink.append(payload)
-                return 1
+                return self.listeners
+
+            def subscriber_count(self):
+                return self.listeners
 
         self.broadcaster = FakeBroadcaster(self.published)
 
@@ -345,9 +349,25 @@ class PresenceRouting(unittest.TestCase):
         self.send(self.serve_with(True), "stop|dnd|s1\n")
         self.assertEqual(len(self.player.played), 2)
 
-    def test_stays_silent_locally_when_absent(self):
+    def test_stays_silent_locally_when_absent_and_someone_is_listening(self):
         self.send(self.serve_with(False), "stop|dnd|s1\n")
         self.assertEqual(self.player.played, [])
+
+    def test_plays_locally_when_absent_but_nobody_is_listening(self):
+        """Handing a chime to nobody loses it, which is worse than playing it
+        to an empty room."""
+        self.broadcaster.listeners = 0
+        self.send(self.serve_with(False), "stop|dnd|s1\n")
+        self.assertEqual(len(self.player.played), 2)
+
+    def test_logs_why_it_played_while_away(self):
+        self.broadcaster.listeners = 0
+        self.send(self.serve_with(False), "stop|dnd|s1\n")
+        self.assertTrue(any("nobody listening" in m for m in self.logs))
+
+    def test_plays_locally_when_absent_and_there_is_no_broadcaster_at_all(self):
+        self.send(self.serve_with(False, broadcaster=False), "stop|dnd|s1\n")
+        self.assertEqual(len(self.player.played), 2)
 
     def test_broadcasts_regardless_of_presence(self):
         self.send(self.serve_with(False), "stop|dnd|s1\n")

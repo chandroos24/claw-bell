@@ -267,6 +267,10 @@ event the browser receives. Each device then applies its own rule.
 | Off | yes | yes | no |
 | Off | no | no | no |
 
+With one override: if **no browser is connected at all** — nobody has the page
+open, or the VPN is down — the Mac plays regardless of presence. Handing a
+chime to nobody loses it, which is worse than playing it to an empty room.
+
 Presence detection **fails open**: if it cannot read the idle time, the Mac
 plays, which is the behaviour from before this feature existed.
 

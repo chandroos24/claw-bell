@@ -138,6 +138,7 @@ should parse as little as possible.
 | Second SSH session to the same server | Cannot re-bind port 8127 there; ssh warns and continues, and the first session's tunnel still serves every session on that host |
 | Malformed or hostile line | Rejected by validation, logged, dropped |
 | Presence probe fails | Returns "at the Mac", so it plays locally — the behaviour from before presence existed |
+| Away, but no browser connected | Plays locally anyway; a chime handed to nobody is lost, which is worse than playing to an empty room |
 | Web server disabled or crashed | TCP path and local playback unaffected |
 | No phone connected | Event is broadcast to nobody; the Mac is unaffected |
 | Phone tab not armed | Silent, and the page says so |

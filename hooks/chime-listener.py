@@ -255,10 +255,23 @@ def make_handler(sounds_dir, config, player, log, broadcaster=None, presence_cac
             # Presence decides only whether THIS machine makes noise. The event
             # goes out either way, so the phone can act on it.
             here = presence_cache.active() if presence_cache is not None else True
-            where = "here" if here else "away"
+
+            # But handing a chime to nobody is worse than playing it to an
+            # empty room. With no browser connected there is no second sink,
+            # so being away is not a reason to stay silent — it would simply
+            # lose the chime, which is the one outcome this plugin exists to
+            # prevent.
+            listeners = broadcaster.subscriber_count() if broadcaster is not None else 0
+            if here:
+                where = "here"
+            elif listeners == 0:
+                where = "away, nobody listening"
+            else:
+                where = f"away, {listeners} listening"
+
             log(f"{label}: {event} ({where}) -> {', '.join(t.name for t in tracks)}")
 
-            if here:
+            if here or listeners == 0:
                 player.submit(tracks, label)
 
             if broadcaster is not None:
