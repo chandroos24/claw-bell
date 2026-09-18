@@ -27,17 +27,17 @@ to play. No audio crosses the wire, no inbound firewall hole, no extra keys.
 
 ```mermaid
 flowchart LR
-    subgraph S1["s1 &mdash; dattaaipc01"]
+    subgraph S1["s1 &mdash; Linux server"]
         C1["Claude Code session"] --> H1["notify-sound.sh"]
         H1 -->|"stop&#124;dnd&#124;s1"| P1(["127.0.0.1:8127"])
     end
 
-    subgraph S2["s2 &mdash; dattaaipc02"]
+    subgraph S2["s2 &mdash; Linux server"]
         C2["Claude Code session"] --> H2["notify-sound.sh"]
         H2 -->|"notification&#124;classical&#124;s2"| P2(["127.0.0.1:8127"])
     end
 
-    subgraph MAC["Mac &mdash; PuruAir"]
+    subgraph MAC["MacBook"]
         L["chime-listener.py<br/>127.0.0.1:8127"]
         L --> V{"validate"}
         V -->|"reject"| X["log &amp; drop"]
@@ -91,7 +91,7 @@ so `../../etc` cannot escape the sounds tree. Playback is serialized behind a
 lock — two servers chiming at once queue rather than talk over each other.
 Activity goes to `~/Library/Logs/claw-bell.log`.
 
-Kept running by `~/Library/LaunchAgents/com.chandroos.claw-bell.plist`
+Kept running by `~/Library/LaunchAgents/com.claw-bell.listener.plist`
 (`RunAtLoad` + `KeepAlive`).
 
 ## Telling the machines apart

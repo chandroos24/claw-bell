@@ -29,16 +29,16 @@ These were established by investigation, not assumption, and each one changed
 the design:
 
 1. **Tailscale is the wrong transport here.** Android permits exactly one VPN
-   at a time, and WireGuard already occupies that slot on the S24. Tailscale
+   at a time, and WireGuard already occupies that slot on the phone. Tailscale
    and WireGuard cannot both run. Using the existing WireGuard network removes
    this conflict, and with it the MagicDNS dependency and the
    cert-cannot-be-issued-for-an-IP problem.
 
-2. **The Mac is already routable on WireGuard** at `10.66.66.2` (interface
-   `utun6`, network `10.66.66.0/24`, hub `10.66.66.1` = s1). Verified
+2. **The Mac is already routable on WireGuard** at `10.0.0.2` (interface
+   `utun6`, network `10.0.0.0/24`, hub `10.0.0.1` = s1). Verified
    reachable from s1 at ~30 ms.
 
-3. **`http://10.66.66.2:8128` is not a secure context.** Only `localhost` gets
+3. **`http://10.0.0.2:8128` is not a secure context.** Only `localhost` gets
    that treatment; private IPs do not. This costs Service Worker, Web Push and
    Screen Wake Lock. It does *not* cost Web Audio or MediaSession, so the
    Android keepalive still works. See "Future: HTTPS" if that changes.
@@ -54,7 +54,7 @@ flowchart TD
     S1["s1 session"] -->|"stop&#124;dnd&#124;s1"| L
     S2["s2 session"] -->|"notification&#124;classical&#124;s2"| L
 
-    subgraph MAC["Mac &mdash; 10.66.66.2"]
+    subgraph MAC["Mac &mdash; 10.0.0.2"]
         L["chime-listener.py<br/>127.0.0.1:8127"]
         P["presence probe<br/>idle + lock"]
         L --> P
@@ -62,10 +62,10 @@ flowchart TD
         D -->|"yes"| A["afplay 🔊"]
         D -->|"no"| Q["skip local"]
         L --> B["broadcaster"]
-        B --> W["chime_web.py<br/>10.66.66.2:8128"]
+        B --> W["chime_web.py<br/>10.0.0.2:8128"]
     end
 
-    W -->|"SSE over WireGuard"| PH["Android Chrome<br/>Samsung S24"]
+    W -->|"SSE over WireGuard"| PH["Android Chrome<br/>an Android phone"]
     PH --> T{"toggle"}
     T -->|"Always"| PL["play 🔊"]
     T -->|"Away &amp; !mac_active"| PL
@@ -190,7 +190,7 @@ phone fires a burst of old chimes.
 ## Security model
 
 - `chime_web.py` binds one configured address, never `0.0.0.0`. Default
-  `127.0.0.1`; set to `10.66.66.2` to reach the phone. Binding the WireGuard
+  `127.0.0.1`; set to `10.0.0.2` to reach the phone. Binding the WireGuard
   address specifically means the LAN cannot reach it even when the tunnel is up.
 - WireGuard membership **is** the authentication. There is no login.
 - The endpoint exposes which hosts chimed and when, which leaks when you are at
@@ -206,7 +206,7 @@ New keys, all in `~/.claude/claw-bell.json` or the plugin's `config.json`:
 | Key | Default | Meaning |
 |---|---|---|
 | `web_enabled` | `false` | start the HTTP server at all |
-| `web_bind` | `127.0.0.1` | address to bind; `10.66.66.2` to reach the phone |
+| `web_bind` | `127.0.0.1` | address to bind; `10.0.0.2` to reach the phone |
 | `web_port` | `8128` | HTTP port |
 | `presence_enabled` | `false` | gate local playback on presence |
 | `idle_threshold` | `300` | seconds of HID idle before "away" |
@@ -225,7 +225,7 @@ listening socket and no behaviour change.
 | `EventSource` drops | Auto-reconnects; no replay, so nothing stale fires |
 | Presence probe fails | Returns `True`, Mac plays — today's behaviour |
 | Slow phone client | Bounded per-client queue drops events; `afplay` never stalls |
-| Phone `AllowedIPs` too narrow | Would make the Mac unreachable from the phone. Confirmed not the case: the tunnel allows `10.66.66.0/24`, which covers `10.66.66.2` |
+| Phone `AllowedIPs` too narrow | Would make the Mac unreachable from the phone. Confirmed not the case: the tunnel allows `10.0.0.0/24`, which covers `10.0.0.2` |
 | **Android VPN slot taken** | Resolved by using WireGuard, which already holds it |
 | **Samsung sleeping-apps eviction** | Tab or tunnel killed; surfaces as amber/red indicator |
 | **Android Doze** | Connection drops; reconnects on wake, no stale burst |
@@ -243,22 +243,22 @@ assert the client receives the right theme, label and `mac_active`; assert a
 second client also receives it; assert a disconnected client is cleaned up;
 assert `Last-Event-ID` produces no replay.
 
-**Manual** — arm the page on the S24 over WireGuard, chime from s1, confirm the
+**Manual** — arm the page on the phone over WireGuard, chime from s1, confirm the
 themed WAV plays; lock the Mac and confirm routing flips; confirm the amber
 indicator appears when the listener is stopped.
 
 ## Future: HTTPS
 
 If Web Push, Service Worker or Wake Lock become desirable, the clean path is a
-DNS-01 Let's Encrypt certificate for a name like `claw.dharmaposhanam.in` with
-a public A record pointing at `10.66.66.2`. Public DNS pointing at a private
+DNS-01 Let's Encrypt certificate for a name like `claw.example.com` with
+a public A record pointing at `10.0.0.2`. Public DNS pointing at a private
 address is ordinary and costs nothing. That upgrade is additive and does not
 change anything above.
 
 ## Resolved questions
 
 1. **Phone reachability.** The phone's WireGuard tunnel allows
-   `10.66.66.0/24`, which covers the Mac at `10.66.66.2`. No config change
+   `10.0.0.0/24`, which covers the Mac at `10.0.0.2`. No config change
    needed.
 2. **Mute precedence.** Mute wins, as specified under Routing policy. It is
    enforced on the sending host, so a muted session never reaches either sink.

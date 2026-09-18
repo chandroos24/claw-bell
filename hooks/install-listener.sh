@@ -13,9 +13,23 @@
 
 set -euo pipefail
 
-LABEL="com.chandroos.claw-bell"
+LABEL="com.claw-bell.listener"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/claw-bell.log"
+
+# Labels used before this one. Left running they would hold port 8127 and
+# fight the new agent for it, so retire them on both install and uninstall.
+LEGACY_LABELS="com.chandroos.claw-bell"
+
+retire_legacy() {
+    for old in $LEGACY_LABELS; do
+        if [ -f "$HOME/Library/LaunchAgents/$old.plist" ]; then
+            launchctl bootout "gui/$UID/$old" 2>/dev/null || true
+            rm -f "$HOME/Library/LaunchAgents/$old.plist"
+            echo "Retired previous agent $old"
+        fi
+    done
+}
 
 if [ "$(uname)" != "Darwin" ]; then
     echo "This installer is macOS-only (it uses launchd and afplay)." >&2
@@ -25,9 +39,12 @@ fi
 if [ "${1:-}" = "--uninstall" ]; then
     launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
     rm -f "$PLIST"
+    retire_legacy
     echo "Removed $LABEL"
     exit 0
 fi
+
+retire_legacy
 
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LISTENER="$PLUGIN_ROOT/hooks/chime-listener.py"

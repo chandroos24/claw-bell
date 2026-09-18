@@ -14,7 +14,7 @@
 
 - **No third-party dependencies.** Python standard library only. The plugin installs on three machines with no pip step.
 - **Tests run as plain scripts:** `python3 tests/test_x.py`, using `unittest`. Match the existing pattern in `tests/test_chime_listener.py`.
-- **Never bind `0.0.0.0`.** Bind exactly one configured address. Default `127.0.0.1`; `10.66.66.2` reaches the phone.
+- **Never bind `0.0.0.0`.** Bind exactly one configured address. Default `127.0.0.1`; `10.0.0.2` reaches the phone.
 - **Everything defaults off.** `web_enabled` and `presence_enabled` default `false`. Updating the plugin must change no existing behaviour.
 - **Presence fails open.** Any probe error returns `True` so the Mac plays, preserving today's behaviour rather than going silently quiet.
 - **No SSE replay.** `Last-Event-ID` is ignored. A phone waking from Doze must not fire a burst of stale chimes.
@@ -73,7 +73,7 @@ IOREG_UNLOCKED = '''
 '''
 
 
-def fake_probe(idle=10.0, locked=False, user="dattavani"):
+def fake_probe(idle=10.0, locked=False, user="localuser"):
     return lambda: {"idle": idle, "locked": locked, "user": user}
 
 
@@ -133,7 +133,7 @@ class Cache(unittest.TestCase):
 
         def counting():
             calls.append(1)
-            return {"idle": 10.0, "locked": False, "user": "dattavani"}
+            return {"idle": 10.0, "locked": False, "user": "localuser"}
 
         cache = presence.PresenceCache(ttl=60.0, idle_threshold=300, probe=counting)
         cache.active()
@@ -147,7 +147,7 @@ class Cache(unittest.TestCase):
 
         def counting():
             calls.append(1)
-            return {"idle": 10.0, "locked": False, "user": "dattavani"}
+            return {"idle": 10.0, "locked": False, "user": "localuser"}
 
         cache = presence.PresenceCache(ttl=2.0, idle_threshold=300, probe=counting,
                                        clock=lambda: clock[0])
@@ -1414,7 +1414,7 @@ Write `~/.claude/claw-bell.json`:
   "chime_label": "mac",
   "chime_port": 8127,
   "web_enabled": true,
-  "web_bind": "10.66.66.2",
+  "web_bind": "10.0.0.2",
   "web_port": 8128,
   "presence_enabled": true,
   "idle_threshold": 300
@@ -1425,17 +1425,17 @@ Write `~/.claude/claw-bell.json`:
 
 Run:
 ```bash
-cd /Users/dattavani/bells-and-whistles && claude plugin marketplace update claw-bell && \
+cd /path/to/claw-bell && claude plugin marketplace update claw-bell && \
 claude plugin update bells-and-whistles@claw-bell && \
 bash "$(claude plugin list --json | python3 -c 'import json,sys; print(next(p["installPath"] for p in json.load(sys.stdin) if p["id"].startswith("bells-and-whistles@")))')/hooks/install-listener.sh"
 ```
-Expected: the installer prints `web: http://10.66.66.2:8128` alongside the plist and log lines.
+Expected: the installer prints `web: http://10.0.0.2:8128` alongside the plist and log lines.
 
 - [ ] **Step 4: Verify the stream end to end from s1**
 
 Run (on the Mac, in one terminal):
 ```bash
-curl -N --max-time 30 http://10.66.66.2:8128/events
+curl -N --max-time 30 http://10.0.0.2:8128/events
 ```
 Then from another terminal:
 ```bash
@@ -1450,9 +1450,9 @@ Lock the screen (Ctrl-Cmd-Q), chime from s1, then unlock and check the log:
 Run: `tail -5 ~/Library/Logs/claw-bell.log`
 Expected: the locked-screen chime is logged `(away)` and no sound played on the Mac; an unlocked one is logged `(here)`.
 
-- [ ] **Step 6: Verify on the Samsung S24**
+- [ ] **Step 6: Verify on the phone**
 
-With WireGuard connected on the phone, open `http://10.66.66.2:8128/` in Chrome. Tap "Tap to enable sound". Set the toggle to **Always**. Chime from s1 and confirm the D&D melody plays on the phone. Then set it to **When away from Mac**, chime while sitting at the Mac, and confirm the phone stays silent.
+With WireGuard connected on the phone, open `http://10.0.0.2:8128/` in Chrome. Tap "Tap to enable sound". Set the toggle to **Always**. Chime from s1 and confirm the D&D melody plays on the phone. Then set it to **When away from Mac**, chime while sitting at the Mac, and confirm the phone stays silent.
 
 If the page does not load, check the phone's WireGuard tunnel is connected and that Chrome has battery set to Unrestricted in One UI.
 
@@ -1473,7 +1473,7 @@ git commit -m "Document presence routing and report the web URL on install"
 
 ## Self-Review
 
-**Spec coverage:** Goal → Tasks 1–5. Presence detection (idle + lock + console user, fail-open, 300s) → Task 1. Broadcaster with bounded queues → Task 2. `/`, `/events`, `/sounds/` with whitelist, no replay, heartbeat, no `0.0.0.0` → Task 3. Arm button, three-way toggle, event list, staleness indicator, keepalive, ducking, preload/cache → Task 4. Routing truth table and the `mac_active` stamp → Task 5. Five config keys defaulting off → Tasks 5–6. Manual S24 verification → Task 6. Mute precedence needs no code (enforced on the sending host) and is asserted by the existing `tests/test_notify_ssh.sh` "muted: sends nothing" case, re-run in Task 5 Step 7.
+**Spec coverage:** Goal → Tasks 1–5. Presence detection (idle + lock + console user, fail-open, 300s) → Task 1. Broadcaster with bounded queues → Task 2. `/`, `/events`, `/sounds/` with whitelist, no replay, heartbeat, no `0.0.0.0` → Task 3. Arm button, three-way toggle, event list, staleness indicator, keepalive, ducking, preload/cache → Task 4. Routing truth table and the `mac_active` stamp → Task 5. Five config keys defaulting off → Tasks 5–6. Manual on-device verification → Task 6. Mute precedence needs no code (enforced on the sending host) and is asserted by the existing `tests/test_notify_ssh.sh` "muted: sends nothing" case, re-run in Task 5 Step 7.
 
 **Placeholder scan:** No TBD/TODO. Every code step carries real code. Task 6 Step 7 describes documentation content rather than final prose, which is appropriate for prose but is the one step an executor must compose themselves.
 

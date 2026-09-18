@@ -27,7 +27,7 @@ IOREG_UNLOCKED = '''
 '''
 
 
-def fake_probe(idle=10.0, locked=False, user="dattavani"):
+def fake_probe(idle=10.0, locked=False, user="localuser"):
     return lambda: {"idle": idle, "locked": locked, "user": user}
 
 
@@ -87,7 +87,7 @@ class Cache(unittest.TestCase):
 
         def counting():
             calls.append(1)
-            return {"idle": 10.0, "locked": False, "user": "dattavani"}
+            return {"idle": 10.0, "locked": False, "user": "localuser"}
 
         cache = presence.PresenceCache(ttl=60.0, idle_threshold=300, probe=counting)
         cache.active()
@@ -101,7 +101,7 @@ class Cache(unittest.TestCase):
 
         def counting():
             calls.append(1)
-            return {"idle": 10.0, "locked": False, "user": "dattavani"}
+            return {"idle": 10.0, "locked": False, "user": "localuser"}
 
         cache = presence.PresenceCache(ttl=2.0, idle_threshold=300, probe=counting,
                                        clock=lambda: clock[0])

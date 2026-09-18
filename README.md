@@ -280,7 +280,7 @@ Add to `~/.claude/claw-bell.json` on the workstation:
 ```json
 {
   "web_enabled": true,
-  "web_bind": ["127.0.0.1", "10.66.66.2"],
+  "web_bind": ["127.0.0.1", "10.0.0.2"],
   "web_port": 8128,
   "presence_enabled": true,
   "idle_threshold": 300
