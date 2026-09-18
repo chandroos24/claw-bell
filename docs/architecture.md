@@ -37,7 +37,7 @@ flowchart LR
         H2 -->|"notification&#124;classical&#124;s2"| P2(["127.0.0.1:8127"])
     end
 
-    subgraph MAC["Mac &mdash; Chandru"]
+    subgraph MAC["Mac &mdash; PuruAir"]
         L["chime-listener.py<br/>127.0.0.1:8127"]
         L --> V{"validate"}
         V -->|"reject"| X["log &amp; drop"]
