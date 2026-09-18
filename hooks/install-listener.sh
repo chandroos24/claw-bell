@@ -93,6 +93,20 @@ if [ "$PONG" = "pong" ]; then
     echo "claw-bell listener running on 127.0.0.1:$PORT"
     echo "  plist: $PLIST"
     echo "  log:   $LOG"
+    WEB=$(python3 -c "
+import json, os
+cfg = {}
+for p in ('$PLUGIN_ROOT/config.json', os.path.expanduser('~/.claude/claw-bell.json')):
+    try:
+        d = json.load(open(p))
+        if isinstance(d, dict):
+            cfg.update(d)
+    except Exception:
+        pass
+if str(cfg.get('web_enabled', False)).lower() == 'true':
+    print('http://%s:%s' % (cfg.get('web_bind', '127.0.0.1'), cfg.get('web_port', 8128)))
+")
+    [ -n "$WEB" ] && echo "  web:   $WEB"
 else
     echo "Agent loaded but nothing is listening on port $PORT." >&2
     echo "Check $LOG for the reason." >&2

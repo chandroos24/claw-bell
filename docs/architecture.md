@@ -40,11 +40,17 @@ flowchart LR
     subgraph MAC["Mac &mdash; Chandru"]
         L["chime-listener.py<br/>127.0.0.1:8127"]
         L --> V{"validate"}
-        V -->|"ok"| A["afplay melody<br/>afplay speech"]
         V -->|"reject"| X["log &amp; drop"]
+        V -->|"ok"| PR{"at the Mac?"}
+        PR -->|"yes"| A["afplay melody<br/>afplay speech"]
+        PR -->|"no"| Q["skip local"]
+        V -->|"ok"| BC["broadcaster"]
+        BC --> WEB["chime_web.py<br/>SSE :8128"]
         A --> SPK(["🔊"])
         C3["Local Claude session"] --> H3["notify-sound.sh"] --> A
     end
+
+    WEB -.->|"SSE over VPN"| PHONE["phone browser<br/>🔊 when away"]
 
     P1 -.->|"ssh -R tunnel"| L
     P2 -.->|"ssh -R tunnel"| L
@@ -131,6 +137,13 @@ should parse as little as possible.
 | Mac asleep | Connect fails, terminal bell |
 | Second SSH session to the same server | Cannot re-bind port 8127 there; ssh warns and continues, and the first session's tunnel still serves every session on that host |
 | Malformed or hostile line | Rejected by validation, logged, dropped |
+| Presence probe fails | Returns "at the Mac", so it plays locally — the behaviour from before presence existed |
+| Web server disabled or crashed | TCP path and local playback unaffected |
+| No phone connected | Event is broadcast to nobody; the Mac is unaffected |
+| Phone tab not armed | Silent, and the page says so |
+| Phone out of range, slow, or asleep | Its bounded queue drops events; local playback never stalls |
+| Heartbeat missed | Page turns amber rather than looking healthy |
+| Phone reconnects after sleep | Rejoins a live stream; `Last-Event-ID` is ignored so no stale burst fires |
 
 Every failure degrades to exactly the behaviour that exists today. Nothing
 gets worse than a beep.

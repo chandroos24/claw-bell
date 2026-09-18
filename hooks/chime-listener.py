@@ -18,6 +18,8 @@ See docs/architecture.md.
 """
 
 import argparse
+import importlib.util
+import itertools
 import json
 import os
 import queue
@@ -27,8 +29,24 @@ import socketserver
 import subprocess
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _sibling(name, filename):
+    """Load a neighbouring module. This file's name has a hyphen, so the whole
+    package uses explicit loading rather than import statements."""
+    spec = importlib.util.spec_from_file_location(
+        name, Path(__file__).resolve().parent / filename
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+presence = _sibling("presence", "presence.py")
+broadcast = _sibling("broadcast", "broadcast.py")
+chime_web = _sibling("chime_web", "chime_web.py")
 
 VALID_EVENTS = ("stop", "notification")
 LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -131,6 +149,28 @@ def resolve(sounds_dir, event, theme, config, rng=random):
     return tracks
 
 
+def build_event(event, theme, label, tracks, sounds_dir, mac_active, seq, now):
+    """The JSON a browser receives. Names the exact files the Mac chose, so the
+    phone plays the same sound rather than a generic beep."""
+    sounds_dir = Path(sounds_dir)
+    urls = []
+    for track in tracks:
+        try:
+            urls.append("/sounds/" + Path(track).relative_to(sounds_dir).as_posix())
+        except ValueError:
+            urls.append(None)
+    return {
+        "id": seq,
+        "ts": now,
+        "event": event,
+        "theme": theme,
+        "label": label,
+        "melody": urls[0] if len(urls) > 0 else None,
+        "speech": urls[1] if len(urls) > 1 else None,
+        "mac_active": mac_active,
+    }
+
+
 class Player:
     """Serializes playback so two hosts chiming at once queue, not collide."""
 
@@ -169,7 +209,9 @@ class Player:
             self.queue.task_done()
 
 
-def make_handler(sounds_dir, config, player, log):
+def make_handler(sounds_dir, config, player, log, broadcaster=None, presence_cache=None):
+    seq = itertools.count(1)
+
     class Handler(socketserver.StreamRequestHandler):
         timeout = 5
 
@@ -210,8 +252,22 @@ def make_handler(sounds_dir, config, player, log):
                 ack(b"err")
                 return
 
-            log(f"{label}: {event} -> {', '.join(t.name for t in tracks)}")
-            player.submit(tracks, label)
+            # Presence decides only whether THIS machine makes noise. The event
+            # goes out either way, so the phone can act on it.
+            here = presence_cache.active() if presence_cache is not None else True
+            where = "here" if here else "away"
+            log(f"{label}: {event} ({where}) -> {', '.join(t.name for t in tracks)}")
+
+            if here:
+                player.submit(tracks, label)
+
+            if broadcaster is not None:
+                stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                broadcaster.publish(build_event(
+                    event, theme, label, tracks, sounds_dir, here, next(seq),
+                    stamp.replace("+00:00", "Z"),
+                ))
+
             ack(b"ok")
 
     return Handler
@@ -243,11 +299,32 @@ def main(argv=None):
 
     player = Player(command=args.player, log=log)
 
+    presence_cache = None
+    if str(config.get("presence_enabled", False)).lower() == "true":
+        threshold = int(config.get("idle_threshold", 300))
+        presence_cache = presence.PresenceCache(idle_threshold=threshold)
+        log(f"presence gating on (idle threshold {threshold}s)")
+
+    broadcaster = None
+    if str(config.get("web_enabled", False)).lower() == "true":
+        broadcaster = broadcast.Broadcaster()
+        chime_web.serve(
+            config.get("web_bind", "127.0.0.1"),
+            int(config.get("web_port", 8128)),
+            sounds_dir,
+            broadcaster,
+            root / "web" / "index.html",
+            log,
+        )
+
     class Server(socketserver.ThreadingTCPServer):
         allow_reuse_address = True
         daemon_threads = True
 
-    server = Server(("127.0.0.1", port), make_handler(sounds_dir, config, player, log))
+    server = Server(
+        ("127.0.0.1", port),
+        make_handler(sounds_dir, config, player, log, broadcaster, presence_cache),
+    )
     log(
         f"listening on 127.0.0.1:{port}, sounds={sounds_dir}, "
         f"themes={sorted(list_themes(sounds_dir))}"

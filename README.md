@@ -248,6 +248,76 @@ workstation is asleep, the hook rings the terminal bell exactly as before.
 
 Check `~/Library/Logs/claw-bell.log` on the workstation to see what arrived.
 
+## Presence routing and the phone
+
+The workstation can also serve the chime to a browser, so a phone on the same
+private network makes the noise when you are not at your desk.
+
+The listener reads whether you are actually at the Mac — logged in, screen
+unlocked, and keyboard or mouse touched within `idle_threshold` — and uses it
+twice: to decide whether to play locally, and as a `mac_active` flag on every
+event the browser receives. Each device then applies its own rule.
+
+| Phone toggle | At the Mac | Mac plays | Phone plays |
+|---|---|---|---|
+| Always | yes | yes | yes |
+| Always | no | no | yes |
+| When away from Mac | yes | yes | no |
+| When away from Mac | no | no | yes |
+| Off | yes | yes | no |
+| Off | no | no | no |
+
+Presence detection **fails open**: if it cannot read the idle time, the Mac
+plays, which is the behaviour from before this feature existed.
+
+Mute outranks all of it. `/mute` is enforced on the sending host, so a muted
+session reaches neither device.
+
+### Enabling it
+
+Add to `~/.claude/claw-bell.json` on the workstation:
+
+```json
+{
+  "web_enabled": true,
+  "web_bind": "10.66.66.2",
+  "web_port": 8128,
+  "presence_enabled": true,
+  "idle_threshold": 300
+}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `web_enabled` | `false` | serve the browser page at all |
+| `web_bind` | `127.0.0.1` | address to bind — set to your VPN address to reach the phone |
+| `web_port` | `8128` | HTTP port |
+| `presence_enabled` | `false` | gate local playback on whether you are at the Mac |
+| `idle_threshold` | `300` | seconds of inactivity before you count as away |
+
+Then re-run `install-listener.sh`; it prints the URL when the web server is on.
+
+**`web_bind` is never `0.0.0.0`.** Bind the one interface you want reachable.
+Set to a WireGuard or Tailscale address, VPN membership is the only
+authentication — there is no login, and the page reveals which hosts chimed and
+when.
+
+### On the phone
+
+Open the URL, tap **Tap to enable sound** once — browsers block audio until a
+gesture — then pick a toggle. The page shows a live list and a status dot:
+green when a heartbeat arrived recently, amber when one is missed, red when
+disconnected. The amber state matters: most mobile failures look like a working
+page that silently delivers nothing.
+
+Audio only plays while the tab is open and in the foreground. On Android, the
+optional **keep playing with the screen off** checkbox starts a silent looping
+track plus a MediaSession, which keeps the tab alive with the screen off — at
+the cost of a persistent media notification and battery. iOS ignores it.
+
+On Samsung One UI, set both Chrome and your VPN app to **Unrestricted** battery
+usage, or "sleeping apps" will evict them and the page will go quiet.
+
 ## Regenerating sounds
 
 The pre-generated WAV files live in `sounds/`. To regenerate melodies (no

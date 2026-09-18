@@ -256,5 +256,121 @@ class EndToEnd(unittest.TestCase):
         self.assertFalse(any("rejected" in line for line in self.logs))
 
 
+class BuildEvent(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.sounds = build_sounds(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_maps_tracks_to_sound_urls(self):
+        tracks = chime.resolve(self.sounds, "stop", "dnd", {})
+        ev = chime.build_event("stop", "dnd", "s1", tracks, self.sounds, True, 7,
+                               "2026-09-17T14:00:00Z")
+        # resolve() picks randomly among the theme's WAVs, so assert the shape.
+        self.assertRegex(ev["melody"], r"^/sounds/dnd/dnd_\w+\.wav$")
+        self.assertEqual(ev["speech"], "/sounds/speech/us/male/stop_0.wav")
+
+    def test_carries_identity_and_presence(self):
+        tracks = chime.resolve(self.sounds, "stop", "dnd", {})
+        ev = chime.build_event("stop", "dnd", "s1", tracks, self.sounds, False, 7,
+                               "2026-09-17T14:00:00Z")
+        self.assertEqual(ev["label"], "s1")
+        self.assertEqual(ev["event"], "stop")
+        self.assertEqual(ev["theme"], "dnd")
+        self.assertEqual(ev["mac_active"], False)
+        self.assertEqual(ev["id"], 7)
+        self.assertEqual(ev["ts"], "2026-09-17T14:00:00Z")
+
+    def test_speech_is_none_when_only_a_melody_played(self):
+        tracks = chime.resolve(self.sounds, "stop", "dnd", {"mode": "sound_only"})
+        ev = chime.build_event("stop", "dnd", "s1", tracks, self.sounds, True, 1, "t")
+        self.assertIsNone(ev["speech"])
+
+
+class PresenceRouting(unittest.TestCase):
+    """The Mac plays only when someone is at it; the event always goes out."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.sounds = build_sounds(self.tmp.name)
+        self.logs = []
+        self.player = chime.Player(command="/usr/bin/true", log=self.logs.append)
+        self.published = []
+        self.server = None
+
+        class FakeBroadcaster:
+            def __init__(self, sink):
+                self.sink = sink
+
+            def publish(self, payload):
+                self.sink.append(payload)
+                return 1
+
+        self.broadcaster = FakeBroadcaster(self.published)
+
+    def tearDown(self):
+        if self.server is not None:
+            self.server.shutdown()
+            self.server.server_close()
+        self.tmp.cleanup()
+
+    def serve_with(self, present, broadcaster=True, presence_obj=True):
+        class FakePresence:
+            def active(self_inner):
+                return present
+
+        handler = chime.make_handler(
+            self.sounds, {}, self.player, self.logs.append,
+            self.broadcaster if broadcaster else None,
+            FakePresence() if presence_obj else None,
+        )
+
+        class Server(chime.socketserver.ThreadingTCPServer):
+            allow_reuse_address = True
+            daemon_threads = True
+
+        self.server = Server(("127.0.0.1", 0), handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return self.server.server_address[1]
+
+    def send(self, port, line):
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+            s.sendall(line.encode())
+            s.recv(16)
+        time.sleep(0.3)
+
+    def test_plays_locally_when_present(self):
+        self.send(self.serve_with(True), "stop|dnd|s1\n")
+        self.assertEqual(len(self.player.played), 2)
+
+    def test_stays_silent_locally_when_absent(self):
+        self.send(self.serve_with(False), "stop|dnd|s1\n")
+        self.assertEqual(self.player.played, [])
+
+    def test_broadcasts_regardless_of_presence(self):
+        self.send(self.serve_with(False), "stop|dnd|s1\n")
+        self.assertEqual(len(self.published), 1)
+        self.assertEqual(self.published[0]["label"], "s1")
+        self.assertEqual(self.published[0]["mac_active"], False)
+
+    def test_rejected_chime_is_not_broadcast(self):
+        self.send(self.serve_with(True), "stop|../../etc|s1\n")
+        self.assertEqual(self.published, [])
+
+    def test_event_ids_increment(self):
+        port = self.serve_with(True)
+        self.send(port, "stop|dnd|s1\n")
+        self.send(port, "notification|classical|s2\n")
+        self.assertEqual([e["id"] for e in self.published], [1, 2])
+
+    def test_without_presence_it_always_plays(self):
+        """Backwards compatibility: no presence object means today's behaviour."""
+        self.send(self.serve_with(False, broadcaster=False, presence_obj=False),
+                  "stop|dnd|s1\n")
+        self.assertEqual(len(self.player.played), 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
