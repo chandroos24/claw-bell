@@ -305,9 +305,12 @@ when.
 Give it a list including `127.0.0.1`. On macOS a WireGuard `utun` is
 point-to-point, so packets the Mac sends to its own tunnel address are routed
 *into* the tunnel rather than looped back — bind the VPN address alone and the
-Mac cannot open its own page, even though every peer can. An address that
-fails to bind is logged and skipped, so a VPN that is down does not take the
-local page with it.
+Mac cannot open its own page, even though every peer can.
+
+A VPN address does not exist while the tunnel is down, so an address that
+cannot be bound is logged once and retried every 30 seconds in the background.
+The local page keeps working throughout, and the phone starts working again by
+itself when the tunnel returns — no restart needed.
 
 ### On the phone
 

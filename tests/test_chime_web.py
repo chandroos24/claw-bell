@@ -93,34 +93,64 @@ class MultiBind(unittest.TestCase):
         self.page.write_text("<!doctype html><title>claw-bell</title>")
         self.logs = []
         self.b = broadcast.Broadcaster()
-        self.servers = []
+        self.group = None
 
     def tearDown(self):
-        for s in self.servers:
-            s.shutdown()
-            s.server_close()
+        if self.group is not None:
+            self.group.shutdown()
         self.tmp.cleanup()
 
     def test_unbindable_address_is_skipped_not_fatal(self):
-        self.servers = web.serve_many(
+        self.group = web.serve_many(
             ["203.0.113.7", "127.0.0.1"], 0, self.sounds, self.b,
             self.page, self.logs.append)
-        self.assertEqual(len(self.servers), 1)
-        self.assertEqual(self.servers[0].server_address[0], "127.0.0.1")
+        self.assertEqual(list(self.group.servers), ["127.0.0.1"])
         self.assertTrue(any("cannot bind 203.0.113.7" in m for m in self.logs))
 
     def test_all_addresses_unbindable_is_survivable(self):
-        self.servers = web.serve_many(
+        self.group = web.serve_many(
             ["203.0.113.7"], 0, self.sounds, self.b, self.page, self.logs.append)
-        self.assertEqual(self.servers, [])
+        self.assertEqual(self.group.servers, {})
         self.assertTrue(any("no address could be bound" in m for m in self.logs))
 
     def test_bound_server_actually_serves(self):
-        self.servers = web.serve_many(
+        self.group = web.serve_many(
             ["127.0.0.1"], 0, self.sounds, self.b, self.page, self.logs.append)
-        port = self.servers[0].server_address[1]
+        port = self.group.servers["127.0.0.1"].server_address[1]
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as r:
             self.assertIn(b"claw-bell", r.read())
+
+    def test_an_address_that_appears_later_is_picked_up(self):
+        """A VPN address does not exist until the tunnel is up."""
+        self.group = web.serve_many(
+            ["203.0.113.7", "127.0.0.1"], 0, self.sounds, self.b,
+            self.page, self.logs.append, retry_seconds=0.2)
+        self.assertEqual(self.group.pending(), ["203.0.113.7"])
+
+        # Stand in for the tunnel coming up: the address becomes bindable.
+        self.group.binds = ["127.0.0.1"]
+        deadline = time.time() + 5
+        while self.group.pending() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertEqual(self.group.pending(), [])
+
+    def test_failure_is_logged_once_not_every_retry(self):
+        self.group = web.serve_many(
+            ["203.0.113.7"], 0, self.sounds, self.b, self.page,
+            self.logs.append, retry_seconds=0.2)
+        time.sleep(1.0)     # several retries elapse
+        complaints = [m for m in self.logs if "cannot bind 203.0.113.7" in m]
+        self.assertEqual(len(complaints), 1)
+
+    def test_no_retry_thread_when_everything_binds_immediately(self):
+        def rebinders():
+            return [t for t in threading.enumerate() if t.name == "claw-bell-rebind"]
+
+        self.group = web.serve_many(
+            ["127.0.0.1"], 0, self.sounds, self.b, self.page,
+            self.logs.append, retry_seconds=0.2)
+        self.assertEqual(self.group.pending(), [])
+        self.assertEqual(rebinders(), [])
 
 
 class Server(unittest.TestCase):

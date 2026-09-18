@@ -131,8 +131,73 @@ def serve(bind, port, sounds_dir, broadcaster, page_path, log, heartbeat=HEARTBE
     return server
 
 
+class BindGroup:
+    """The set of addresses currently served, and the retry that fills it in.
+
+    A VPN address only exists while the tunnel is up. Binding is therefore not
+    a one-time startup step: an address that is unavailable now becomes
+    available when the VPN reconnects, and the phone must start working again
+    without anyone restarting the agent.
+    """
+
+    def __init__(self, binds, port, sounds_dir, broadcaster, page_path, log,
+                 heartbeat=HEARTBEAT_SECONDS, retry_seconds=30):
+        self.binds = list(binds)
+        self.port = port
+        self.retry_seconds = retry_seconds
+        self.servers = {}
+        self._args = (sounds_dir, broadcaster, page_path, log, heartbeat)
+        self._log = log
+        self._reported = set()
+        self._stop = threading.Event()
+
+    def attempt(self):
+        """Bind whatever is not bound yet. Returns the number newly bound."""
+        sounds_dir, broadcaster, page_path, log, heartbeat = self._args
+        added = 0
+        for bind in self.binds:
+            if bind in self.servers:
+                continue
+            try:
+                self.servers[bind] = serve(bind, self.port, sounds_dir,
+                                           broadcaster, page_path, log, heartbeat)
+                self._reported.discard(bind)
+                added += 1
+            except OSError as exc:
+                # Log each address once, not every retry, or an absent VPN
+                # fills the log with identical lines forever.
+                if bind not in self._reported:
+                    log(f"web: cannot bind {bind}:{self.port} ({exc}) — "
+                        f"will retry every {self.retry_seconds}s")
+                    self._reported.add(bind)
+        return added
+
+    def pending(self):
+        return [b for b in self.binds if b not in self.servers]
+
+    def start(self):
+        self.attempt()
+        if not self.servers:
+            self._log(f"web: no address could be bound on port {self.port} yet")
+        if self.pending() and self.retry_seconds:
+            threading.Thread(target=self._retry_loop, daemon=True,
+                             name="claw-bell-rebind").start()
+        return self
+
+    def _retry_loop(self):
+        while self.pending() and not self._stop.wait(self.retry_seconds):
+            self.attempt()
+
+    def shutdown(self):
+        self._stop.set()
+        for server in self.servers.values():
+            server.shutdown()
+            server.server_close()
+        self.servers.clear()
+
+
 def serve_many(binds, port, sounds_dir, broadcaster, page_path, log,
-               heartbeat=HEARTBEAT_SECONDS):
+               heartbeat=HEARTBEAT_SECONDS, retry_seconds=30):
     """Bind several specific addresses rather than one, or 0.0.0.0.
 
     On macOS a WireGuard utun is point-to-point: packets the Mac sends to its
@@ -140,16 +205,9 @@ def serve_many(binds, port, sounds_dir, broadcaster, page_path, log,
     binding only the VPN address leaves the machine unable to open its own
     page. Binding loopback as well fixes that without exposing the LAN.
 
-    A bind that fails is logged and skipped — a VPN that is merely down must
-    not stop the local page from working.
+    A bind that fails is logged and retried in the background, so a VPN that is
+    down now does not stop the local page working, and the phone starts working
+    again by itself when the tunnel returns.
     """
-    servers = []
-    for bind in binds:
-        try:
-            servers.append(serve(bind, port, sounds_dir, broadcaster,
-                                 page_path, log, heartbeat))
-        except OSError as exc:
-            log(f"web: cannot bind {bind}:{port} ({exc}) — skipping")
-    if not servers:
-        log(f"web: no address could be bound on port {port}")
-    return servers
+    return BindGroup(binds, port, sounds_dir, broadcaster, page_path, log,
+                     heartbeat, retry_seconds).start()
