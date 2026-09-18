@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "claw-bell",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "owner": {
     "name": "chandroos24",
     "url": "https://github.com/chandroos24/claw-bell"
@@ -12,7 +12,7 @@
       "name": "bells-and-whistles",
       "source": "./",
       "description": "Play notification sounds and voice announcements when Claude Code stops or needs attention. Sessions on remote hosts forward their chime to a listener on your workstation over the existing SSH connection.",
-      "version": "1.6.1",
+      "version": "1.6.2",
       "category": "productivity",
       "homepage": "https://github.com/chandroos24/claw-bell",
       "author": {

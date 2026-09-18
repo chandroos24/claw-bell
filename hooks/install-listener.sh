@@ -84,10 +84,17 @@ print(cfg.get('chime_port', 8127))
 
 # Ping rather than a bare port probe: it confirms the listener is actually
 # answering, not merely that something holds the port, and it stays silent.
-PONG=$(exec 3<>"/dev/tcp/127.0.0.1/$PORT" 2>/dev/null \
-       && printf 'ping\n' >&3 \
-       && { read -t 3 -r reply <&3; echo "$reply"; } \
-       && exec 3>&-)
+# Retried, because launchd start plus module import is not instant and a single
+# early probe reports a working install as broken.
+PONG=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    PONG=$( (exec 3<>"/dev/tcp/127.0.0.1/$PORT" 2>/dev/null \
+             && printf 'ping\n' >&3 \
+             && { read -t 3 -r reply <&3; echo "$reply"; } \
+             && exec 3>&-) 2>/dev/null )
+    [ "$PONG" = "pong" ] && break
+    sleep 1
+done
 
 if [ "$PONG" = "pong" ]; then
     echo "claw-bell listener running on 127.0.0.1:$PORT"
