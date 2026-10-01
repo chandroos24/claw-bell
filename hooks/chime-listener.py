@@ -8,7 +8,13 @@ resolves the line to local WAV files and plays them.
 
 Wire format, newline-terminated, one per connection:
 
-    event|theme|label        e.g.  stop|dnd|s1
+    event|theme|label[|project]    e.g.  stop|dnd|s1
+                                         notification|dnd|s1|bells-and-whistles
+
+The project is optional, so a host still running the three-field hook keeps
+working. When it is present on a notification, the phrase becomes "Claude is
+waiting for you on <project>", synthesized here by the local voice and cached
+under sounds/speech/projects/.
 
 Binds to loopback only. Every field is validated before it reaches the
 filesystem: the theme is whitelisted against a real directory listing rather
@@ -47,6 +53,7 @@ def _sibling(name, filename):
 presence = _sibling("presence", "presence.py")
 broadcast = _sibling("broadcast", "broadcast.py")
 chime_web = _sibling("chime_web", "chime_web.py")
+project_speech = _sibling("project_speech", "project_speech.py")
 
 VALID_EVENTS = ("stop", "notification")
 LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -96,7 +103,11 @@ def list_themes(sounds_dir):
 
 
 def parse_message(line, valid_themes):
-    """Parse and validate one wire line into (event, theme, label)."""
+    """Parse and validate one wire line into (event, theme, label, project).
+
+    The project is optional and comes back as None when absent, so a host
+    still running the three-field hook is accepted unchanged.
+    """
     if len(line) > MAX_LINE:
         raise ChimeError("line too long")
 
@@ -105,10 +116,11 @@ def parse_message(line, valid_themes):
         raise ChimeError("empty line")
 
     parts = text.split("|")
-    if len(parts) != 3:
-        raise ChimeError(f"expected 3 fields, got {len(parts)}")
+    if len(parts) not in (3, 4):
+        raise ChimeError(f"expected 3 or 4 fields, got {len(parts)}")
 
-    event, theme, label = parts
+    event, theme, label = parts[:3]
+    project = parts[3] if len(parts) == 4 else None
 
     if event not in VALID_EVENTS:
         raise ChimeError(f"unknown event {event!r}")
@@ -116,8 +128,13 @@ def parse_message(line, valid_themes):
         raise ChimeError(f"unknown theme {theme!r}")
     if not LABEL_RE.match(label):
         raise ChimeError(f"bad label {label!r}")
+    # The project becomes a filename and a sentence read aloud, so it is held
+    # to the same character set as the label rather than sanitised after the
+    # fact. The sender already slugifies; anything else is a bug or an attack.
+    if project is not None and not LABEL_RE.match(project):
+        raise ChimeError(f"bad project {project!r}")
 
-    return event, theme, label
+    return event, theme, label, project
 
 
 def pick_melody(sounds_dir, theme, rng=random):
@@ -131,11 +148,27 @@ def pick_speech(sounds_dir, event, accent, gender, rng=random):
     return rng.choice(wavs) if wavs else None
 
 
-def resolve(sounds_dir, event, theme, config, rng=random):
-    """Which files to play, honouring the configured mode."""
+def pick_project_speech(sounds_dir, accent, gender, project, log=None):
+    """The "Claude is waiting for you on <project>" WAV, cut by the local voice.
+
+    None when there is no project, no voice, or synthesis fails, which sends
+    the caller back to the shipped phrase.
+    """
+    if not project:
+        return None
+    return project_speech.ensure(sounds_dir, accent, gender, project, log=log)
+
+
+def resolve(sounds_dir, event, theme, config, rng=random, project=None, log=None):
+    """Which files to play, honouring the configured mode.
+
+    A notification that knows its project says so. Stop keeps the shipped
+    phrase: knowing a job finished rarely depends on knowing which one.
+    """
     mode = config.get("mode", "sound_and_voice")
     accent = config.get("accent", "us")
     gender = config.get("gender", "male")
+    announce = str(config.get("project_announce", True)).lower() != "false"
 
     tracks = []
     if mode != "voice_only":
@@ -143,13 +176,18 @@ def resolve(sounds_dir, event, theme, config, rng=random):
         if melody:
             tracks.append(melody)
     if mode != "sound_only":
-        speech = pick_speech(sounds_dir, event, accent, gender, rng)
+        speech = None
+        if event == "notification" and announce:
+            speech = pick_project_speech(sounds_dir, accent, gender, project, log)
+        if speech is None:
+            speech = pick_speech(sounds_dir, event, accent, gender, rng)
         if speech:
             tracks.append(speech)
     return tracks
 
 
-def build_event(event, theme, label, tracks, sounds_dir, mac_active, seq, now):
+def build_event(event, theme, label, tracks, sounds_dir, mac_active, seq, now,
+                project=None):
     """The JSON a browser receives. Names the exact files the Mac chose, so the
     phone plays the same sound rather than a generic beep."""
     sounds_dir = Path(sounds_dir)
@@ -165,6 +203,7 @@ def build_event(event, theme, label, tracks, sounds_dir, mac_active, seq, now):
         "event": event,
         "theme": theme,
         "label": label,
+        "project": project,
         "melody": urls[0] if len(urls) > 0 else None,
         "speech": urls[1] if len(urls) > 1 else None,
         "mac_active": mac_active,
@@ -240,13 +279,16 @@ def make_handler(sounds_dir, config, player, log, broadcaster=None, presence_cac
                 return
 
             try:
-                event, theme, label = parse_message(line, list_themes(sounds_dir))
+                event, theme, label, project = parse_message(
+                    line, list_themes(sounds_dir)
+                )
             except ChimeError as exc:
                 log(f"rejected {line.strip()!r}: {exc}")
                 ack(b"err")
                 return
 
-            tracks = resolve(sounds_dir, event, theme, config)
+            tracks = resolve(sounds_dir, event, theme, config,
+                             project=project, log=log)
             if not tracks:
                 log(f"{label}: {event}/{theme} resolved to nothing to play")
                 ack(b"err")
@@ -269,7 +311,8 @@ def make_handler(sounds_dir, config, player, log, broadcaster=None, presence_cac
             else:
                 where = f"away, {listeners} listening"
 
-            log(f"{label}: {event} ({where}) -> {', '.join(t.name for t in tracks)}")
+            whose = f"{label}/{project}" if project else label
+            log(f"{whose}: {event} ({where}) -> {', '.join(t.name for t in tracks)}")
 
             if here or listeners == 0:
                 player.submit(tracks, label)
@@ -278,7 +321,7 @@ def make_handler(sounds_dir, config, player, log, broadcaster=None, presence_cac
                 stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
                 broadcaster.publish(build_event(
                     event, theme, label, tracks, sounds_dir, here, next(seq),
-                    stamp.replace("+00:00", "Z"),
+                    stamp.replace("+00:00", "Z"), project,
                 ))
 
             ack(b"ok")
@@ -311,6 +354,11 @@ def main(argv=None):
         print(f"{stamp} {message}", file=handle, flush=True)
 
     player = Player(command=args.player, log=log)
+
+    # Off the request path: enumerating voices is slow, and the first chime
+    # from a project nobody has seen should not be the one that waits for it.
+    threading.Thread(target=project_speech.prime, daemon=True,
+                     name="claw-bell-voices").start()
 
     presence_cache = None
     if str(config.get("presence_enabled", False)).lower() == "true":

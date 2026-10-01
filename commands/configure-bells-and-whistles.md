@@ -85,6 +85,22 @@ Map:
 
 If mode is `sound_only`, default voice_style to `full_sentence`.
 
+### 5b. Ask whether to name the project (if voice enabled AND voice_style is full_sentence)
+Use AskUserQuestion:
+- Question: "When Claude is waiting on you, should the voice say which project it is?"
+- Options: ["Yes — 'Claude is waiting for you on my-app'", "No — use the generic phrase"]
+
+Map:
+- "Yes — ..." → `project_announce`: `true`
+- "No — ..." → `project_announce`: `false`
+
+The project phrase is synthesized by the operating system's own voice the
+first time a chime comes from a given project, then cached — it needs no
+credentials and no regeneration. Completion chimes are unaffected either way.
+
+If mode is `sound_only` or voice_style is `number_only`, default
+`project_announce` to `true`; it has no effect in those modes.
+
 ### 6. Write config
 Write `${CLAUDE_PLUGIN_ROOT}/config.json` with:
 ```json
@@ -94,7 +110,8 @@ Write `${CLAUDE_PLUGIN_ROOT}/config.json` with:
   "gender": "<selected_gender>",
   "voice_style": "<selected_voice_style>",
   "theme": "<selected_theme>",
-  "use_themed_phrases": <true_or_false>
+  "use_themed_phrases": <true_or_false>,
+  "project_announce": <true_or_false>
 }
 ```
 
@@ -124,6 +141,7 @@ Print a summary:
 - Mode: <display name>
 - Speech: "themed phrases" or "standard (<accent> <gender>)" (if applicable)
 - Voice style: <display name> (if applicable)
+- Project announcement: on or off (if applicable)
 - Number of melody files available
 - Number of speech files available
 - Whether old hooks were cleaned up

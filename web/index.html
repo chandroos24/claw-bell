@@ -159,7 +159,8 @@
       `<span class="host"></span><span class="meta"></span><span class="time"></span>`;
     li.querySelector(".host").textContent = ev.label || "?";
     li.querySelector(".meta").textContent =
-      `${ev.event === "stop" ? "finished" : "needs input"} · ${ev.theme || ""}`;
+      [ev.event === "stop" ? "finished" : "needs input", ev.project, ev.theme]
+        .filter(Boolean).join(" · ");
     li.querySelector(".time").textContent = t.toLocaleTimeString();
     logEl.prepend(li);
     while (logEl.children.length > 50) logEl.lastElementChild.remove();

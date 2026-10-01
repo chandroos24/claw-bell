@@ -49,7 +49,7 @@ run_hook() { # event label theme port
     printf '{"theme":"%s","chime_label":"%s","chime_port":%s}\n' \
         "$theme" "$label" "$port" > "$home/.claude/claw-bell.json"
 
-    echo '{}' | env \
+    printf '{"cwd":"%s"}' "${PROJECT_CWD:-/srv/the-repo}" | env \
         HOME="$home" \
         CLAUDE_PLUGIN_ROOT="$REPO" \
         SSH_CONNECTION="10.0.0.9 5555 10.0.0.1 22" \
@@ -75,9 +75,39 @@ for spec in "stop s1 dnd" "notification s2 classical"; do
     while [ ! -s "$RECV" ] && [ $wait_for -lt 50 ]; do sleep 0.1; wait_for=$((wait_for+1)); done
     exec 4<&-
 
-    check "$label: exits 0"        "0"                              "$rc"
-    check "$label: wire format"    "${event}|${theme}|${label}"     "$(cat "$RECV" 2>/dev/null | tr -d '\n')"
+    check "$label: exits 0"        "0"                                           "$rc"
+    check "$label: wire format"    "${event}|${theme}|${label}|the-repo"         "$(cat "$RECV" 2>/dev/null | tr -d '\n')"
 done
+
+# --- the project name is the session's directory, slugified ------------------
+# It becomes a filename and a sentence on the workstation, so whatever the
+# directory is called, what goes on the wire has to be tame.
+for spec in "Bells-And-Whistles bells-and-whistles" "My Cool App|my-cool-app"; do
+    dir="${spec%%|*}"; want="${spec##*|}"
+    [ "$dir" = "$spec" ] && { dir="${spec%% *}"; want="${spec##* }"; }
+
+    RECV="$WORK/recv-slug"
+    rm -f "$RECV"
+    exec 4< <(start_listener "$RECV")
+    read -r PORT <&4
+    PROJECT_CWD="/srv/$dir" run_hook notification s3 dnd "$PORT" >/dev/null 2>&1
+    wait_for=0
+    while [ ! -s "$RECV" ] && [ $wait_for -lt 50 ]; do sleep 0.1; wait_for=$((wait_for+1)); done
+    exec 4<&-
+    check "project '$dir' goes on the wire as '$want'" \
+        "notification|dnd|s3|$want" "$(cat "$RECV" 2>/dev/null | tr -d '\n')"
+done
+
+# --- no project: three fields, as an older listener expects ------------------
+RECV="$WORK/recv-noproject"
+exec 4< <(start_listener "$RECV")
+read -r PORT <&4
+PROJECT_CWD="/" run_hook notification s1 dnd "$PORT" >/dev/null 2>&1
+wait_for=0
+while [ ! -s "$RECV" ] && [ $wait_for -lt 50 ]; do sleep 0.1; wait_for=$((wait_for+1)); done
+exec 4<&-
+check "no project: sends three fields" \
+    "notification|dnd|s1" "$(cat "$RECV" 2>/dev/null | tr -d '\n')"
 
 # --- no listener: must fall back to the bell, not hang or error -------------
 RECV="$WORK/recv-none"
@@ -124,7 +154,7 @@ if [ "$waited" -ge 1 ]; then
 else
     bad "waits for the listener's ack" "returned in ${waited}s, did not wait"
 fi
-check "ack path: wire format"     "stop|dnd|s1"    "$(cat "$RECV" 2>/dev/null | tr -d '\n')"
+check "ack path: wire format"     "stop|dnd|s1|the-repo"    "$(cat "$RECV" 2>/dev/null | tr -d '\n')"
 
 # --- a muted session must stay silent, tunnel or no tunnel ------------------
 RECV="$WORK/recv-muted"

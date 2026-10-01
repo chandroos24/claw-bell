@@ -69,7 +69,8 @@ Unchanged on the Mac. The SSH branch gains one step before the bell fallback:
    *before* this point, so `/mute` keeps working on remote sessions.
 2. Open `/dev/tcp/127.0.0.1/$CHIME_PORT`. This is a bash builtin, so the
    servers need no `nc`, no python, no new package.
-3. Write one line: `event|theme|label`.
+3. Write one line: `event|theme|label|project`, dropping the last field when
+   the session's directory has no usable name.
 4. If the connect fails — no tunnel up, listener down — fall back to
    `printf '\a'`, exactly today's behaviour.
 
@@ -85,6 +86,7 @@ Every field is validated before it touches the filesystem:
 | `event` | must be `stop` or `notification`                             |
 | `theme` | must match a directory that actually exists under `sounds/`  |
 | `label` | `[A-Za-z0-9._-]` only                                        |
+| `project` | optional; `[A-Za-z0-9._-]` only, same rule as `label`      |
 
 `theme` is whitelisted against a real directory listing rather than sanitised,
 so `../../etc` cannot escape the sounds tree. Playback is serialized behind a
@@ -120,13 +122,55 @@ Both hooks already declared in `hooks/hooks.json` forward over the tunnel:
 ## Message format
 
 ```
-event|theme|label\n
+event|theme|label[|project]\n
 ```
 
-Newline-terminated, one per connection, ASCII. Example: `stop|dnd|s1`.
+Newline-terminated, one per connection, ASCII. Examples: `stop|dnd|s1`,
+`notification|dnd|s1|bells-and-whistles`.
 
 Deliberately not JSON — the sender is a bash builtin redirect, and the receiver
 should parse as little as possible.
+
+The fourth field is optional, so a host still running the three-field hook
+keeps working against a new listener, and a new hook keeps working against an
+old one — the old listener rejects the line, the sender sees the rejection and
+rings the terminal bell rather than going silent.
+
+## Naming the project
+
+A chime that says *something* wants you is only half an answer when four
+sessions are running. When the fourth field is present on a `notification`,
+the listener says **"Claude is waiting for you on &lt;project&gt;"** instead of
+the generic shipped phrase.
+
+The project is the session directory's own name, slugified by
+`hooks/project_speech.py` on the host that chimed. Only that slug crosses the
+wire: the Mac never sees a remote path, and never speaks anything it did not
+first validate against the same character set as the label.
+
+The shipped phrases under `sounds/speech/` were cut once by Polly, so they
+cannot name a project nobody had heard of at build time. The per-project
+phrase is therefore synthesized by whatever voice the operating system already
+has — `say` on macOS, SAPI on Windows, espeak on Linux — and cached at
+
+```
+sounds/speech/projects/<accent>/<gender>/notification_<slug>.wav
+```
+
+so only the first chime from a given checkout pays for synthesis. The cache
+sits inside `sounds/` deliberately: `chime_web.py` serves that tree, so the
+phone hears the same sentence as the Mac rather than a generic beep.
+
+Synthesis happens on whichever machine has the speakers, never on both. The
+hook skips it entirely on the SSH path, and the listener primes its voice list
+at startup so the first unseen project is not also the one that waits for it.
+
+`stop` keeps its shipped phrase. Knowing a job finished rarely depends on
+knowing which one, and every extra word is a word you hear all day.
+
+Set `"project_announce": false` to turn the whole thing off. If there is no
+voice on the machine, or synthesis fails, the generic phrase plays — the one
+outcome ruled out is silence.
 
 ## Failure modes
 
