@@ -1,0 +1,7 @@
+__pycache__/
+.mute_all
+.mute_tty_*
+
+# Per-project phrases, cut by the local voice on first use and
+# regenerated for free if an upgrade wipes them.
+sounds/speech/projects/
