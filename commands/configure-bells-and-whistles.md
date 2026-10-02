@@ -100,6 +100,38 @@ synthesized by the operating system's own voice the first time a chime comes
 from a given project, then cached — it needs no credentials and no
 regeneration.
 
+### 5c. Ask which voice speaks it (macOS only, if project_announce is true)
+Skip this step entirely on WSL and Linux — `project_voice` names a macOS voice
+and is ignored elsewhere, where accent and gender still choose.
+
+List the voices this Mac actually has, in the accent's locale:
+
+```bash
+say -v '?' | grep "$(test "<selected_accent>" = uk && echo en_GB || echo en_US)"
+```
+
+Use AskUserQuestion, offering **Samantha** first as the default, then up to
+three more from that listing, preferring natural-sounding ones (Ava, Allison,
+Reed, Rocko, Daniel, Serena) over the novelty voices (Bells, Bubbles, Zarvox,
+Trinoids, Bad News). Name them exactly as the listing prints them:
+
+- Question: "Which voice should speak the project name?"
+- Options: ["Samantha (default)", "<second>", "<third>", "<fourth>"]
+
+Set `project_voice` to the chosen name, with the " (default)" suffix stripped.
+Offer to play a sample before writing, using the user's own project name:
+
+```bash
+say -v "<chosen>" "Task complete on <current directory name>"
+```
+
+If the user picks a voice macOS does not have, the chime falls back down the
+accent/gender list rather than going silent — but prefer offering only names
+from the listing above so it never comes to that.
+
+If `project_announce` is `false` or the platform is not macOS, omit
+`project_voice` from the config entirely.
+
 If mode is `sound_only` or voice_style is `number_only`, default
 `project_announce` to `true`; it has no effect in those modes.
 
@@ -113,7 +145,8 @@ Write `${CLAUDE_PLUGIN_ROOT}/config.json` with:
   "voice_style": "<selected_voice_style>",
   "theme": "<selected_theme>",
   "use_themed_phrases": <true_or_false>,
-  "project_announce": <true_or_false>
+  "project_announce": <true_or_false>,
+  "project_voice": "<selected_voice>"
 }
 ```
 
@@ -144,6 +177,7 @@ Print a summary:
 - Speech: "themed phrases" or "standard (<accent> <gender>)" (if applicable)
 - Voice style: <display name> (if applicable)
 - Project announcement: on or off (if applicable)
+- Project voice: <name> (macOS only, if applicable)
 - Number of melody files available
 - Number of speech files available
 - Whether old hooks were cleaned up

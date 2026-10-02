@@ -158,7 +158,7 @@ phrase is therefore synthesized by whatever voice the operating system already
 has — `say` on macOS, SAPI on Windows, espeak on Linux — and cached at
 
 ```
-sounds/speech/projects/<accent>/<gender>/<event>_<slug>.wav
+sounds/speech/projects/<voice>/<event>_<slug>.wav
 ```
 
 so only the first chime from a given checkout pays for synthesis. The cache
@@ -168,6 +168,12 @@ phone hears the same sentence as the Mac rather than a generic beep.
 Synthesis happens on whichever machine has the speakers, never on both. The
 hook skips it entirely on the SSH path, and the listener primes its voice list
 at startup so the first unseen project is not also the one that waits for it.
+
+The bucket is the voice, not the accent and gender, so changing
+`project_voice` cannot serve back the previous voice's recording. It is keyed
+on the voice *requested* rather than the one resolved: resolving means listing
+every installed voice, which costs most of a second, and a cache hit should
+cost a path lookup.
 
 Set `"project_announce": false` to turn the whole thing off. If there is no
 voice on the machine, or synthesis fails, the generic phrase plays — the one

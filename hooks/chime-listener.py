@@ -148,7 +148,8 @@ def pick_speech(sounds_dir, event, accent, gender, rng=random):
     return rng.choice(wavs) if wavs else None
 
 
-def pick_project_speech(sounds_dir, event, accent, gender, project, log=None):
+def pick_project_speech(sounds_dir, event, accent, gender, project, voice=None,
+                        log=None):
     """This event's phrase, naming the project, cut by the local voice.
 
     None when there is no project, no voice, or synthesis fails, which sends
@@ -157,7 +158,7 @@ def pick_project_speech(sounds_dir, event, accent, gender, project, log=None):
     if not project:
         return None
     return project_speech.ensure(sounds_dir, accent, gender, project, event,
-                                 log=log)
+                                 voice, log=log)
 
 
 def resolve(sounds_dir, event, theme, config, rng=random, project=None, log=None):
@@ -170,6 +171,7 @@ def resolve(sounds_dir, event, theme, config, rng=random, project=None, log=None
     accent = config.get("accent", "us")
     gender = config.get("gender", "male")
     announce = str(config.get("project_announce", True)).lower() != "false"
+    voice = config.get("project_voice") or None
 
     tracks = []
     if mode != "voice_only":
@@ -180,7 +182,7 @@ def resolve(sounds_dir, event, theme, config, rng=random, project=None, log=None
         speech = None
         if announce:
             speech = pick_project_speech(sounds_dir, event, accent, gender,
-                                         project, log)
+                                         project, voice, log)
         if speech is None:
             speech = pick_speech(sounds_dir, event, accent, gender, rng)
         if speech:

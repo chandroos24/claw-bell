@@ -61,6 +61,26 @@ chime from a given project. They are cached under `sounds/speech/projects/`,
 so every chime after the first costs nothing. Remote sessions get it too: the
 project name rides along the SSH tunnel and the workstation does the speaking.
 
+On macOS the voice is **Samantha** by default. `/configure-bells-and-whistles`
+offers the voices your Mac actually has, or set one directly:
+
+```json
+{ "project_voice": "Daniel" }
+```
+
+Name it as `say -v '?'` prints it. A voice ships in several locales — `Reed
+(English (US))` and `Reed (English (UK))` — and a bare `Reed` resolves to
+whichever matches your accent. A name your Mac does not have falls back to a
+voice it does rather than going silent. `project_voice` is macOS-only; Windows
+and Linux have their own voice namespaces, and there accent and gender still
+choose.
+
+To hear one before committing to it:
+
+```bash
+say -v Samantha "Task complete on my-app"
+```
+
 The project phrase replaces whichever phrase you picked, themed ones included,
 so if you would rather keep "Wake up, samurai", set `"project_announce":
 false`. If there is no voice available on the machine, the generic phrase
@@ -117,16 +137,16 @@ ElevenLabs requires `ffmpeg` for MP3→WAV conversion.
 
 ## Installation
 
-Install from the Groundwork Marketplace. Add the marketplace once:
+Add the marketplace once:
 
 ```
-claude plugin marketplace add etr/groundwork-marketplace
+claude plugin marketplace add chandroos24/claw-bell
 ```
 
 Then install the plugin:
 
 ```
-claude plugin install bells-and-whistles@groundwork-marketplace
+claude plugin install bells-and-whistles@claw-bell
 ```
 
 Run the built-in setup command to choose your theme, mode, and voice:
@@ -141,7 +161,7 @@ configurations.
 To update later:
 
 ```
-claude plugin update bells-and-whistles@groundwork-marketplace
+claude plugin update bells-and-whistles@claw-bell
 ```
 
 ### Manual installation
@@ -149,7 +169,7 @@ claude plugin update bells-and-whistles@groundwork-marketplace
 If you prefer to clone the repo yourself:
 
 ```
-claude plugins add /path/to/bells-and-whistles
+claude plugins add /path/to/claw-bell
 ```
 
 ## Muting
@@ -182,6 +202,7 @@ Edit `config.json` directly if you prefer:
   "gender": "male",
   "voice_style": "full_sentence",
   "project_announce": true,
+  "project_voice": "Samantha",
   "theme": "cyberpunk",
   "use_themed_phrases": true
 }
@@ -194,6 +215,9 @@ Edit `config.json` directly if you prefer:
 **gender** — `male` or `female` (used for standard phrases; ignored when `use_themed_phrases` is true)
 
 **voice_style** — `full_sentence` or `number_only`
+
+**project_voice** — macOS voice for the project phrases, as `say -v '?'` names
+them (default: `Samantha`). Ignored on Windows and Linux.
 
 **project_announce** — `true` (default) to name the project in both chimes
 ("Task complete on &lt;project&gt;", "Claude is waiting for you on

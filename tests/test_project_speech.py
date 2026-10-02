@@ -132,8 +132,8 @@ class Ensure(unittest.TestCase):
         self.calls = []
         self.real = ps.synthesize
 
-        def fake(text, target, accent="us", gender="male", log=None):
-            self.calls.append((text, accent, gender))
+        def fake(text, target, accent="us", gender="male", voice=None, log=None):
+            self.calls.append((text, accent, gender, voice))
             Path(target).write_bytes(b"RIFF")
             return True
 
@@ -158,7 +158,7 @@ class Ensure(unittest.TestCase):
         found = ps.ensure(self.sounds, "us", "male", "myapp")
         self.assertEqual(
             found.relative_to(self.sounds).as_posix(),
-            "speech/projects/us/male/notification_myapp.wav",
+            "speech/projects/samantha/notification_myapp.wav",
         )
 
     def test_each_event_gets_its_own_cache(self):
@@ -170,10 +170,15 @@ class Ensure(unittest.TestCase):
         self.assertIn("waiting for you", self.calls[1][0])
 
     def test_each_voice_gets_its_own_cache(self):
+        """Changing the voice must not serve back the old voice's WAV."""
         a = ps.ensure(self.sounds, "us", "male", "myapp")
-        b = ps.ensure(self.sounds, "uk", "female", "myapp")
+        b = ps.ensure(self.sounds, "us", "male", "myapp", voice="Daniel")
         self.assertNotEqual(a, b)
         self.assertEqual(len(self.calls), 2)
+
+    def test_the_chosen_voice_reaches_the_synthesizer(self):
+        ps.ensure(self.sounds, "us", "male", "myapp", voice="Daniel")
+        self.assertEqual(self.calls[0][3], "Daniel")
 
     def test_speaks_the_project_name(self):
         ps.ensure(self.sounds, "us", "male", "myapp")
@@ -212,8 +217,8 @@ class SynthesisFailure(unittest.TestCase):
 
     def test_leaves_no_partial_file_behind(self):
         ps.ensure(self.sounds, "us", "male", "myapp")
-        leftovers = list(Path(self.sounds, "speech", "projects", "us", "male").iterdir())
-        self.assertEqual(leftovers, [])
+        bucket = ps.cache_path(self.sounds, "us", "male", "myapp").parent
+        self.assertEqual(list(bucket.iterdir()), [])
 
     def test_a_command_that_exits_nonzero_is_not_cached(self):
         ps._command_for = lambda *a, **k: ["false"]
@@ -252,26 +257,82 @@ class RealVoice(unittest.TestCase):
 
 
 @unittest.skipUnless(platform.system() == "Darwin", "macOS voice selection")
+class MacVoiceDefault(unittest.TestCase):
+    """Samantha unless told otherwise, whatever the gender setting says."""
+
+    def test_defaults_to_samantha(self):
+        for gender in ("male", "female"):
+            with self.subTest(gender=gender):
+                self.assertEqual(ps._mac_voice("us", gender), "Samantha")
+
+    def test_an_explicit_voice_wins(self):
+        self.assertEqual(ps._mac_voice("us", "male", "Daniel"), "Daniel")
+
+    def test_a_voice_that_is_not_installed_falls_back(self):
+        """A typo must not cost you the chime."""
+        fallback = ps._mac_voice("us", "male", "Nonexistent Voice")
+        self.assertIsNotNone(fallback)
+        self.assertNotEqual(fallback, "Nonexistent Voice")
+
+    def test_a_bare_name_resolves_to_the_accents_locale(self):
+        """"Reed" ships as both US and UK; the accent breaks the tie."""
+        us = ps._mac_voice("us", "male", "Reed")
+        uk = ps._mac_voice("uk", "male", "Reed")
+        if us and uk and us != uk:
+            self.assertIn("US", us)
+            self.assertIn("UK", uk)
+
+
+class VoiceKey(unittest.TestCase):
+    """The cache bucket has to change when the voice does."""
+
+    @unittest.skipUnless(platform.system() == "Darwin", "macOS buckets by voice")
+    def test_buckets_by_voice_on_macos(self):
+        self.assertEqual(ps.voice_key("us", "male"), "samantha")
+        self.assertEqual(ps.voice_key("us", "male", "Daniel"), "daniel")
+
+    @unittest.skipUnless(platform.system() == "Darwin", "macOS buckets by voice")
+    def test_a_full_parenthesised_name_still_yields_one_segment(self):
+        key = ps.voice_key("us", "male", "Reed (English (US))")
+        self.assertNotIn("/", key)
+        self.assertEqual(key, "reed-english-us")
+
+    @unittest.skipIf(platform.system() == "Darwin", "other platforms ignore it")
+    def test_elsewhere_the_bucket_is_accent_and_gender(self):
+        self.assertEqual(ps.voice_key("uk", "female", "Samantha"), "uk-female")
+
+
+@unittest.skipUnless(platform.system() == "Darwin", "macOS voice selection")
 class MacVoiceSelection(unittest.TestCase):
-    def test_picks_a_voice_in_the_requested_locale(self):
-        listing = ps._mac_voice_listing()
-        for accent, locale in (("us", "en_US"), ("uk", "en_GB")):
+    def test_every_resolved_voice_is_one_macos_actually_has(self):
+        installed = {full for full, _ in ps.installed_mac_voices()}
+        self.assertTrue(installed, "say -v '?' listed nothing")
+        for accent in ("us", "uk"):
             for gender in ("male", "female"):
-                voice = ps._mac_voice(accent, gender)
-                if voice is None:
-                    continue
-                with self.subTest(accent=accent, gender=gender):
-                    line = next(l for l in listing.splitlines()
-                                if l.startswith(voice))
-                    self.assertIn(locale, line)
+                for wanted in (None, "Daniel", "Nonexistent"):
+                    voice = ps._mac_voice(accent, gender, wanted)
+                    if voice is None:
+                        continue
+                    with self.subTest(accent=accent, gender=gender, wanted=wanted):
+                        self.assertIn(voice, installed)
+
+    def test_an_installed_choice_is_never_second_guessed(self):
+        """Whatever you ask for, if macOS has it, that is what you get."""
+        installed = {full.split(" (")[0] for full, _ in ps.installed_mac_voices()}
+        asked = 0
+        for name in sorted(installed)[:12]:
+            resolved = ps._mac_voice("us", "male", name)
+            with self.subTest(name=name):
+                self.assertEqual(resolved.split(" (")[0], name)
+            asked += 1
+        self.assertGreater(asked, 0, "no installed voices to check")
 
     def test_a_voice_with_spaces_in_its_name_survives_intact(self):
         """\"Reed (English (US))\" must come back whole; \"Reed\" alone is ambiguous."""
-        for accent in ("us", "uk"):
-            for gender in ("male", "female"):
-                voice = ps._mac_voice(accent, gender)
-                if voice and "(" in voice:
-                    self.assertTrue(voice.endswith(")"))
+        for wanted in ("Reed", "Rocko", "Shelley"):
+            voice = ps._mac_voice("us", "male", wanted)
+            if voice and "(" in voice:
+                self.assertTrue(voice.endswith(")"))
 
 
 class CLI(unittest.TestCase):

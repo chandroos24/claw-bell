@@ -92,7 +92,7 @@ absent "and does not reuse the waiting phrase" \
     "notification_bells-and-whistles" "$played"
 
 # --- and it is cut once, not once per chime ---------------------------------
-CACHED="$REPO/sounds/speech/projects/us/male/stop_bells-and-whistles.wav"
+CACHED="$REPO/sounds/speech/projects/samantha/stop_bells-and-whistles.wav"
 if [ -f "$CACHED" ]; then
     before=$(stat -f %m "$CACHED")
     run_hook stop /srv/bells-and-whistles "$VOICE" >/dev/null
@@ -109,6 +109,17 @@ check "melody and project phrase, in that order" "2" "$(printf '%s\n' "$played" 
 contains "melody comes from the theme" ".wav" "$(printf '%s' "$played" | head -1)"
 contains "project phrase follows it" \
     "notification_bells-and-whistles.wav" "$(printf '%s' "$played" | tail -1)"
+
+# --- choosing a different voice ---------------------------------------------
+# The bucket is the voice, so switching cannot serve back the old recording.
+PICKED='{"theme":"dnd","mode":"voice_only","gender":"male","project_voice":"Daniel"}'
+run_hook stop /srv/bells-and-whistles "$PICKED" >/dev/null
+if [ -f "$REPO/sounds/speech/projects/daniel/stop_bells-and-whistles.wav" ]; then
+    ok "a chosen voice gets its own cache bucket"
+else
+    bad "a chosen voice gets its own cache bucket" \
+        "nothing under sounds/speech/projects/daniel/"
+fi
 
 # --- opting out -------------------------------------------------------------
 OPTOUT='{"theme":"dnd","mode":"voice_only","gender":"male","project_announce":false}'

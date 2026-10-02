@@ -27,6 +27,9 @@ Used as a CLI by hooks/notify-sound.sh:
 
     project_speech.py slug < hook.json      -> bells-and-whistles
     project_speech.py wav --project X --event stop ...  -> stop_X.wav
+
+The macOS voice is Samantha unless "project_voice" in config.json says
+otherwise; a name macOS does not have falls back to the accent/gender list.
 """
 
 import argparse
@@ -52,9 +55,16 @@ SLUG_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 MAX_SLUG = 48
 SYNTH_TIMEOUT = 20
 
-# First installed voice wins. macOS ships a different set per release — Alex
-# and Kate are gone from current versions, Fred is the 1980s fallback — so
-# each entry is an ordered list, not a name.
+# The voice these phrases are spoken in, overridable with "project_voice" in
+# config.json. Samantha is a current, natural macOS voice present on every
+# recent release — unlike Alex, which Apple has dropped. It is deliberately
+# independent of the "gender" setting, which selects among the shipped Polly
+# phrases and says nothing about what the OS has installed.
+DEFAULT_MAC_VOICE = "Samantha"
+
+# Where to fall back when the chosen voice is not installed. First match wins;
+# macOS ships a different set per release — Alex and Kate are gone from current
+# versions, Fred is the 1980s robot — so each entry is a list, not a name.
 MAC_VOICES = {
     ("us", "male"): ["Alex", "Tom", "Reed", "Rocko", "Eddy", "Fred"],
     ("us", "female"): ["Samantha", "Ava", "Allison", "Karen", "Flo", "Sandy"],
@@ -118,12 +128,25 @@ def phrase_for(slug, event=DEFAULT_EVENT):
     return template.format(name=spoken_name(slug))
 
 
-def cache_path(sounds_dir, accent, gender, slug, event=DEFAULT_EVENT):
-    return Path(sounds_dir, "speech", "projects", accent, gender,
-                f"{event}_{slug}.wav")
+def voice_key(accent, gender, voice=None):
+    """The cache bucket: whatever actually decides how the phrase sounds.
+
+    Computed from the *requested* voice rather than the resolved one, so a
+    cache hit costs a path lookup. Resolving a real voice means listing them,
+    which takes most of a second — too much to pay on every chime.
+    """
+    if platform.system() == "Darwin":
+        return slugify(voice or DEFAULT_MAC_VOICE) or f"{accent}-{gender}"
+    return f"{accent}-{gender}"
 
 
-def ensure(sounds_dir, accent, gender, slug, event=DEFAULT_EVENT, log=None):
+def cache_path(sounds_dir, accent, gender, slug, event=DEFAULT_EVENT, voice=None):
+    return Path(sounds_dir, "speech", "projects",
+                voice_key(accent, gender, voice), f"{event}_{slug}.wav")
+
+
+def ensure(sounds_dir, accent, gender, slug, event=DEFAULT_EVENT, voice=None,
+           log=None):
     """The WAV naming this project for this event, cut on first use.
 
     Returns None rather than raising when there is no usable voice, so every
@@ -135,7 +158,7 @@ def ensure(sounds_dir, accent, gender, slug, event=DEFAULT_EVENT, log=None):
     if event not in PHRASES:
         event = DEFAULT_EVENT
 
-    target = cache_path(sounds_dir, accent, gender, slug, event)
+    target = cache_path(sounds_dir, accent, gender, slug, event, voice)
     if target.is_file() and target.stat().st_size > 0:
         return target
 
@@ -146,12 +169,12 @@ def ensure(sounds_dir, accent, gender, slug, event=DEFAULT_EVENT, log=None):
             log(f"project speech: cannot create {target.parent} ({exc})")
         return None
 
-    if synthesize(phrase_for(slug, event), target, accent, gender, log=log):
+    if synthesize(phrase_for(slug, event), target, accent, gender, voice, log):
         return target
     return None
 
 
-def synthesize(text, target, accent="us", gender="male", log=None):
+def synthesize(text, target, accent="us", gender="male", voice=None, log=None):
     """Render text to a WAV at target. True if the file is there afterwards.
 
     Writes to a temporary file in the same directory and renames, so a chime
@@ -170,7 +193,7 @@ def synthesize(text, target, accent="us", gender="male", log=None):
     tmp = Path(tmp_name)
 
     try:
-        command = _command_for(text, tmp, accent, gender)
+        command = _command_for(text, tmp, accent, gender, voice)
         if command is None:
             if log:
                 log("project speech: no text-to-speech voice on this machine")
@@ -205,46 +228,82 @@ def synthesize(text, target, accent="us", gender="male", log=None):
                 pass
 
 
-def _command_for(text, target, accent, gender):
-    """The argv that renders text to target, or None if nothing can."""
+def _command_for(text, target, accent, gender, voice=None):
+    """The argv that renders text to target, or None if nothing can.
+
+    `voice` names a macOS voice. Windows and Linux have their own voice
+    namespaces, so there it is ignored and accent/gender still choose.
+    """
     if platform.system() == "Darwin":
-        return _mac_command(text, target, accent, gender)
+        return _mac_command(text, target, accent, gender, voice)
     if _is_wsl():
         return _wsl_command(text, target, gender)
     return _espeak_command(text, target, accent, gender)
 
 
-def _mac_command(text, target, accent, gender):
+def _mac_command(text, target, accent, gender, voice=None):
     command = ["say", "-o", str(target), "--data-format=LEI16@22050"]
-    voice = _mac_voice(accent, gender)
-    if voice:
-        command += ["-v", voice]
+    resolved = _mac_voice(accent, gender, voice)
+    if resolved:
+        command += ["-v", resolved]
     return command + ["--", text]
 
 
-def _mac_voice(accent, gender):
-    """The first preferred voice that is installed for this accent's locale.
-
-    Returns the name exactly as `say -v \'?\'` prints it, parentheses and all:
-    several voices ship as both "Reed (English (US))" and "Reed (English
-    (UK))", and only the full name picks the right one.
-    """
-    wanted = MAC_VOICES.get((accent, gender))
-    if not wanted:
-        return None
-
-    locale = MAC_LOCALES.get(accent, "en_US")
-    installed = {}
+def installed_mac_voices():
+    """Every installed voice as (full name, locale), in `say -v \'?\'` order."""
+    found = []
     for line in _mac_voice_listing().splitlines():
         match = MAC_VOICE_LINE.match(line)
-        if not match or match.group("locale") != locale:
-            continue
-        full = match.group("name").strip()
-        installed.setdefault(full.split(" (")[0].lower(), full)
+        if match:
+            found.append((match.group("name").strip(), match.group("locale")))
+    return found
 
-    for name in wanted:
-        if name.lower() in installed:
-            return installed[name.lower()]
+
+def _match_mac_voice(wanted, accent, installed):
+    """Resolve a requested name to one macOS actually has, or None.
+
+    Returns it exactly as `say -v \'?\'` prints it, parentheses and all:
+    several voices ship as both "Reed (English (US))" and "Reed (English
+    (UK))", and only the full name picks the right one. A bare "Reed" matches
+    either, so the requested accent's locale is preferred before any other.
+    """
+    if not wanted:
+        return None
+    target = wanted.strip().lower()
+    locale = MAC_LOCALES.get(accent, "en_US")
+
+    exact = [(full, loc) for full, loc in installed if full.lower() == target]
+    base = [(full, loc) for full, loc in installed
+            if full.split(" (")[0].lower() == target]
+    for candidates in (exact, base):
+        for full, loc in candidates:
+            if loc == locale:
+                return full
+        if candidates:
+            return candidates[0][0]
+    return None
+
+
+def _mac_voice(accent, gender, voice=None):
+    """The voice to speak these phrases in.
+
+    The configured name wins — that is the whole point of the setting. Only
+    when it names something this Mac does not have do we fall back down the
+    accent/gender list, because a voice nobody installed is not a reason to
+    play nothing.
+    """
+    installed = installed_mac_voices()
+    if not installed:
+        return None
+
+    resolved = _match_mac_voice(voice or DEFAULT_MAC_VOICE, accent, installed)
+    if resolved:
+        return resolved
+
+    for name in MAC_VOICES.get((accent, gender), []):
+        resolved = _match_mac_voice(name, accent, installed)
+        if resolved:
+            return resolved
     return None
 
 
@@ -348,6 +407,8 @@ def main(argv=None):
     wav = sub.add_parser("wav", help="print the cached WAV, synthesizing if needed")
     wav.add_argument("--project", required=True)
     wav.add_argument("--event", default=DEFAULT_EVENT, choices=sorted(PHRASES))
+    wav.add_argument("--voice", default=None,
+                     help=f"macOS voice name (default: {DEFAULT_MAC_VOICE})")
     wav.add_argument("--sounds-dir", required=True)
     wav.add_argument("--accent", default="us")
     wav.add_argument("--gender", default="male")
@@ -370,7 +431,7 @@ def main(argv=None):
         return 0
 
     found = ensure(args.sounds_dir, args.accent, args.gender, args.project,
-                   args.event)
+                   args.event, args.voice or None)
     if found:
         print(found)
     return 0

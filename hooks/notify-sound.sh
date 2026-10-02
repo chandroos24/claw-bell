@@ -63,6 +63,7 @@ print(f'GENDER={shlex.quote(c.get(\"gender\",\"male\"))}')
 print(f'VOICE_STYLE={shlex.quote(c.get(\"voice_style\",\"full_sentence\"))}')
 print(f'USE_THEMED_PHRASES={shlex.quote(str(c.get(\"use_themed_phrases\",False)).lower())}')
 print(f'PROJECT_ANNOUNCE={shlex.quote(str(c.get(\"project_announce\",True)).lower())}')
+print(f'PROJECT_VOICE={shlex.quote(c.get(\"project_voice\",\"\"))}')
 print(f'WSL_POWERSHELL_PATH={shlex.quote(c.get(\"wsl_powershell_path\",\"\"))}')
 print(f'CHIME_PORT={shlex.quote(str(c.get(\"chime_port\",8127)))}')
 print(f'CHIME_LABEL={shlex.quote(c.get(\"chime_label\",\"\"))}')
@@ -74,6 +75,7 @@ GENDER="${GENDER:-male}"
 VOICE_STYLE="${VOICE_STYLE:-full_sentence}"
 USE_THEMED_PHRASES="${USE_THEMED_PHRASES:-false}"
 PROJECT_ANNOUNCE="${PROJECT_ANNOUNCE:-true}"
+PROJECT_VOICE="${PROJECT_VOICE:-}"
 CHIME_PORT="${CHIME_PORT:-8127}"
 
 SOUNDS_DIR="$PLUGIN_ROOT/sounds"
@@ -237,7 +239,7 @@ if [ -n "$PROJECT" ] && [ "$MODE" != "sound_only" ] \
    && [ "$VOICE_STYLE" = "full_sentence" ]; then
     if [ "$1" = "stop" ]; then PROJECT_EVENT=stop; else PROJECT_EVENT=notification; fi
     PROJECT_WAV=$(python3 "$PROJECT_SPEECH" wav --project "$PROJECT" \
-        --event "$PROJECT_EVENT" \
+        --event "$PROJECT_EVENT" --voice "$PROJECT_VOICE" \
         --sounds-dir "$SOUNDS_DIR" --accent "$ACCENT" --gender "$GENDER" 2>/dev/null)
     [ -n "$PROJECT_WAV" ] && [ -f "$PROJECT_WAV" ] && SPEECH="$PROJECT_WAV"
 fi

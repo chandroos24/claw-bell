@@ -172,16 +172,16 @@ class ProjectSpeech(unittest.TestCase):
         self.sounds = build_sounds(self.tmp.name)
         self.asked = []
 
-        cache = Path(self.sounds, "speech", "projects", "us", "male")
-        cache.mkdir(parents=True)
+        Path(self.sounds, "speech", "projects").mkdir(parents=True)
 
         def fake_ensure(sounds_dir, accent, gender, slug, event="notification",
-                        log=None):
+                        voice=None, log=None):
             """Stands in for the OS voice: records the ask, hands back a file."""
-            self.asked.append((accent, gender, slug, event))
+            self.asked.append((accent, gender, slug, event, voice))
             if slug == "nosynth":
                 return None
-            wav = Path(sounds_dir, "speech", "projects", accent, gender,
+            wav = Path(sounds_dir, "speech", "projects",
+                       chime.project_speech.voice_key(accent, gender, voice),
                        f"{event}_{slug}.wav")
             wav.parent.mkdir(parents=True, exist_ok=True)
             wav.write_bytes(b"RIFF")
@@ -212,8 +212,8 @@ class ProjectSpeech(unittest.TestCase):
     def test_each_event_asks_for_its_own_phrase(self):
         chime.resolve(self.sounds, "notification", "dnd", {}, project="proj")
         chime.resolve(self.sounds, "stop", "dnd", {}, project="proj")
-        self.assertEqual(self.asked, [("us", "male", "proj", "notification"),
-                                      ("us", "male", "proj", "stop")])
+        self.assertEqual(self.asked, [("us", "male", "proj", "notification", None),
+                                      ("us", "male", "proj", "stop", None)])
 
     def test_no_project_keeps_the_shipped_phrase(self):
         tracks = chime.resolve(self.sounds, "notification", "dnd", {})
@@ -228,7 +228,12 @@ class ProjectSpeech(unittest.TestCase):
     def test_honours_the_configured_voice(self):
         chime.resolve(self.sounds, "stop", "dnd",
                       {"accent": "uk", "gender": "female"}, project="proj")
-        self.assertEqual(self.asked, [("uk", "female", "proj", "stop")])
+        self.assertEqual(self.asked, [("uk", "female", "proj", "stop", None)])
+
+    def test_a_configured_voice_reaches_the_synthesizer(self):
+        chime.resolve(self.sounds, "stop", "dnd", {"project_voice": "Daniel"},
+                      project="proj")
+        self.assertEqual(self.asked[0][4], "Daniel")
 
     def test_project_announce_false_opts_out(self):
         tracks = chime.resolve(self.sounds, "stop", "dnd",
