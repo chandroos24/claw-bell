@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Per-project notification speech: "Claude is waiting for you on <project>".
+"""Per-project chime speech, naming the project in both phrases:
+
+    stop          "Task complete on <project>"
+    notification  "Claude is waiting for you on <project>"
+
 
 The pre-baked phrases under sounds/speech/ are cut once by Polly or
 ElevenLabs and shipped with the plugin, so they cannot name a project nobody
@@ -7,7 +11,7 @@ had heard of at build time. This module fills that gap with the text-to-speech
 voice the operating system already has — `say` on macOS, SAPI on Windows,
 espeak on Linux — and caches the result under
 
-    sounds/speech/projects/<accent>/<gender>/notification_<slug>.wav
+    sounds/speech/projects/<accent>/<gender>/<event>_<slug>.wav
 
 so only the first chime from a given checkout pays for synthesis. The cache
 sits inside sounds/ on purpose: chime_web.py serves that tree, so the phone
@@ -22,7 +26,7 @@ it did not first validate.
 Used as a CLI by hooks/notify-sound.sh:
 
     project_speech.py slug < hook.json      -> bells-and-whistles
-    project_speech.py wav --project X ...   -> /path/to/notification_X.wav
+    project_speech.py wav --project X --event stop ...  -> stop_X.wav
 """
 
 import argparse
@@ -35,7 +39,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-PHRASE = "Claude is waiting for you on {name}"
+# One per hook event. Both name the project, because which window to go to is
+# the thing you cannot work out from the sound alone.
+PHRASES = {
+    "stop": "Task complete on {name}",
+    "notification": "Claude is waiting for you on {name}",
+}
+DEFAULT_EVENT = "notification"
 
 # Matches chime-listener.py's LABEL_RE, so a slug is always a legal wire field.
 SLUG_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
@@ -103,17 +113,18 @@ def spoken_name(slug):
     return re.sub(r"[-._]+", " ", slug).strip()
 
 
-def phrase_for(slug):
-    return PHRASE.format(name=spoken_name(slug))
+def phrase_for(slug, event=DEFAULT_EVENT):
+    template = PHRASES.get(event, PHRASES[DEFAULT_EVENT])
+    return template.format(name=spoken_name(slug))
 
 
-def cache_path(sounds_dir, accent, gender, slug):
+def cache_path(sounds_dir, accent, gender, slug, event=DEFAULT_EVENT):
     return Path(sounds_dir, "speech", "projects", accent, gender,
-                f"notification_{slug}.wav")
+                f"{event}_{slug}.wav")
 
 
-def ensure(sounds_dir, accent, gender, slug, log=None):
-    """The WAV naming this project, synthesizing it on first use.
+def ensure(sounds_dir, accent, gender, slug, event=DEFAULT_EVENT, log=None):
+    """The WAV naming this project for this event, cut on first use.
 
     Returns None rather than raising when there is no usable voice, so every
     caller degrades to the generic shipped phrase instead of going silent.
@@ -121,8 +132,10 @@ def ensure(sounds_dir, accent, gender, slug, log=None):
     slug = slugify(slug)
     if not slug:
         return None
+    if event not in PHRASES:
+        event = DEFAULT_EVENT
 
-    target = cache_path(sounds_dir, accent, gender, slug)
+    target = cache_path(sounds_dir, accent, gender, slug, event)
     if target.is_file() and target.stat().st_size > 0:
         return target
 
@@ -133,7 +146,7 @@ def ensure(sounds_dir, accent, gender, slug, log=None):
             log(f"project speech: cannot create {target.parent} ({exc})")
         return None
 
-    if synthesize(phrase_for(slug), target, accent, gender, log=log):
+    if synthesize(phrase_for(slug, event), target, accent, gender, log=log):
         return target
     return None
 
@@ -334,6 +347,7 @@ def main(argv=None):
 
     wav = sub.add_parser("wav", help="print the cached WAV, synthesizing if needed")
     wav.add_argument("--project", required=True)
+    wav.add_argument("--event", default=DEFAULT_EVENT, choices=sorted(PHRASES))
     wav.add_argument("--sounds-dir", required=True)
     wav.add_argument("--accent", default="us")
     wav.add_argument("--gender", default="male")
@@ -355,7 +369,8 @@ def main(argv=None):
             print(slug)
         return 0
 
-    found = ensure(args.sounds_dir, args.accent, args.gender, args.project)
+    found = ensure(args.sounds_dir, args.accent, args.gender, args.project,
+                   args.event)
     if found:
         print(found)
     return 0

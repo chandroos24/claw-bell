@@ -12,9 +12,9 @@ Wire format, newline-terminated, one per connection:
                                          notification|dnd|s1|bells-and-whistles
 
 The project is optional, so a host still running the three-field hook keeps
-working. When it is present on a notification, the phrase becomes "Claude is
-waiting for you on <project>", synthesized here by the local voice and cached
-under sounds/speech/projects/.
+working. When it is present, the phrase names it — "Task complete on
+<project>", "Claude is waiting for you on <project>" — synthesized here by the
+local voice and cached under sounds/speech/projects/.
 
 Binds to loopback only. Every field is validated before it reaches the
 filesystem: the theme is whitelisted against a real directory listing rather
@@ -148,22 +148,23 @@ def pick_speech(sounds_dir, event, accent, gender, rng=random):
     return rng.choice(wavs) if wavs else None
 
 
-def pick_project_speech(sounds_dir, accent, gender, project, log=None):
-    """The "Claude is waiting for you on <project>" WAV, cut by the local voice.
+def pick_project_speech(sounds_dir, event, accent, gender, project, log=None):
+    """This event's phrase, naming the project, cut by the local voice.
 
     None when there is no project, no voice, or synthesis fails, which sends
     the caller back to the shipped phrase.
     """
     if not project:
         return None
-    return project_speech.ensure(sounds_dir, accent, gender, project, log=log)
+    return project_speech.ensure(sounds_dir, accent, gender, project, event,
+                                 log=log)
 
 
 def resolve(sounds_dir, event, theme, config, rng=random, project=None, log=None):
     """Which files to play, honouring the configured mode.
 
-    A notification that knows its project says so. Stop keeps the shipped
-    phrase: knowing a job finished rarely depends on knowing which one.
+    A chime that knows its project says so, on both events — "Task complete
+    on X" and "Claude is waiting for you on X".
     """
     mode = config.get("mode", "sound_and_voice")
     accent = config.get("accent", "us")
@@ -177,8 +178,9 @@ def resolve(sounds_dir, event, theme, config, rng=random, project=None, log=None
             tracks.append(melody)
     if mode != "sound_only":
         speech = None
-        if event == "notification" and announce:
-            speech = pick_project_speech(sounds_dir, accent, gender, project, log)
+        if announce:
+            speech = pick_project_speech(sounds_dir, event, accent, gender,
+                                         project, log)
         if speech is None:
             speech = pick_speech(sounds_dir, event, accent, gender, rng)
         if speech:

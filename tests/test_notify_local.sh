@@ -80,26 +80,27 @@ echo "notify-sound.sh local branch"
 
 rm -rf "$REPO/sounds/speech/projects"
 
-# --- the headline: a notification names the project -------------------------
+# --- the headline: both events name the project, each in its own words ------
 played=$(run_hook notification /srv/bells-and-whistles "$VOICE")
-contains "notification speaks the project" \
+contains "a blocked turn speaks the project" \
     "notification_bells-and-whistles.wav" "$played"
 
+played=$(run_hook stop /srv/bells-and-whistles "$VOICE")
+contains "a finished turn speaks the project" \
+    "stop_bells-and-whistles.wav" "$played"
+absent "and does not reuse the waiting phrase" \
+    "notification_bells-and-whistles" "$played"
+
 # --- and it is cut once, not once per chime ---------------------------------
-CACHED="$REPO/sounds/speech/projects/us/male/notification_bells-and-whistles.wav"
+CACHED="$REPO/sounds/speech/projects/us/male/stop_bells-and-whistles.wav"
 if [ -f "$CACHED" ]; then
     before=$(stat -f %m "$CACHED")
-    run_hook notification /srv/bells-and-whistles "$VOICE" >/dev/null
+    run_hook stop /srv/bells-and-whistles "$VOICE" >/dev/null
     after=$(stat -f %m "$CACHED")
     check "the phrase is cached, not recut" "$before" "$after"
 else
     bad "the phrase is cached, not recut" "no WAV at $CACHED"
 fi
-
-# --- stop keeps the shipped phrase ------------------------------------------
-played=$(run_hook stop /srv/bells-and-whistles "$VOICE")
-absent "stop does not name the project" "notification_bells-and-whistles" "$played"
-contains "stop uses the shipped phrase" "stop_" "$played"
 
 # --- the melody still plays alongside it ------------------------------------
 BOTH='{"theme":"dnd","mode":"sound_and_voice","gender":"male","accent":"us"}'
@@ -111,19 +112,19 @@ contains "project phrase follows it" \
 
 # --- opting out -------------------------------------------------------------
 OPTOUT='{"theme":"dnd","mode":"voice_only","gender":"male","project_announce":false}'
-played=$(run_hook notification /srv/bells-and-whistles "$OPTOUT")
-absent "project_announce false opts out" "notification_bells-and-whistles" "$played"
-contains "and falls back to the shipped phrase" "notification_" "$played"
+played=$(run_hook stop /srv/bells-and-whistles "$OPTOUT")
+absent "project_announce false opts out" "stop_bells-and-whistles" "$played"
+contains "and falls back to the shipped phrase" "stop_0" "$played"
 
 # --- a directory with nothing usable in its name ----------------------------
-played=$(run_hook notification / "$VOICE")
-contains "no usable project name falls back" "notification_" "$played"
+played=$(run_hook stop / "$VOICE")
+contains "no usable project name falls back" "stop_0" "$played"
 
 # --- sound_only never speaks at all -----------------------------------------
 SILENT='{"theme":"dnd","mode":"sound_only","gender":"male"}'
-played=$(run_hook notification /srv/bells-and-whistles "$SILENT")
+played=$(run_hook stop /srv/bells-and-whistles "$SILENT")
 check "sound_only plays one melody and no speech" "1" "$(printf '%s\n' "$played" | grep -c .)"
-absent "sound_only says nothing" "notification_" "$played"
+absent "sound_only says nothing" "stop_" "$played"
 
 rm -rf "$REPO/sounds/speech/projects"
 

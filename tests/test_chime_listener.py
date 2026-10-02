@@ -175,13 +175,14 @@ class ProjectSpeech(unittest.TestCase):
         cache = Path(self.sounds, "speech", "projects", "us", "male")
         cache.mkdir(parents=True)
 
-        def fake_ensure(sounds_dir, accent, gender, slug, log=None):
+        def fake_ensure(sounds_dir, accent, gender, slug, event="notification",
+                        log=None):
             """Stands in for the OS voice: records the ask, hands back a file."""
-            self.asked.append((accent, gender, slug))
+            self.asked.append((accent, gender, slug, event))
             if slug == "nosynth":
                 return None
             wav = Path(sounds_dir, "speech", "projects", accent, gender,
-                       f"notification_{slug}.wav")
+                       f"{event}_{slug}.wav")
             wav.parent.mkdir(parents=True, exist_ok=True)
             wav.write_bytes(b"RIFF")
             return wav
@@ -193,10 +194,14 @@ class ProjectSpeech(unittest.TestCase):
         chime.project_speech.ensure = self.real_ensure
         self.tmp.cleanup()
 
-    def test_notification_speaks_the_project(self):
-        tracks = chime.resolve(self.sounds, "notification", "dnd", {},
-                               project="bells-and-whistles")
-        self.assertEqual(tracks[1].name, "notification_bells-and-whistles.wav")
+    def test_both_events_speak_the_project(self):
+        """Each in its own words, so "complete" and "waiting" stay distinct."""
+        for event in ("notification", "stop"):
+            with self.subTest(event=event):
+                tracks = chime.resolve(self.sounds, event, "dnd", {},
+                                       project="bells-and-whistles")
+                self.assertEqual(tracks[1].name,
+                                 f"{event}_bells-and-whistles.wav")
 
     def test_project_wav_lives_under_the_sounds_tree(self):
         """chime_web.py only serves sounds/, so the phone needs it in there."""
@@ -204,10 +209,11 @@ class ProjectSpeech(unittest.TestCase):
                                project="bells-and-whistles")
         self.assertTrue(tracks[1].is_relative_to(Path(self.sounds)))
 
-    def test_stop_keeps_the_shipped_phrase(self):
-        tracks = chime.resolve(self.sounds, "stop", "dnd", {}, project="whatever")
-        self.assertEqual(tracks[1].name, "stop_0.wav")
-        self.assertEqual(self.asked, [])
+    def test_each_event_asks_for_its_own_phrase(self):
+        chime.resolve(self.sounds, "notification", "dnd", {}, project="proj")
+        chime.resolve(self.sounds, "stop", "dnd", {}, project="proj")
+        self.assertEqual(self.asked, [("us", "male", "proj", "notification"),
+                                      ("us", "male", "proj", "stop")])
 
     def test_no_project_keeps_the_shipped_phrase(self):
         tracks = chime.resolve(self.sounds, "notification", "dnd", {})
@@ -220,14 +226,14 @@ class ProjectSpeech(unittest.TestCase):
         self.assertEqual(tracks[1].name, "notification_0.wav")
 
     def test_honours_the_configured_voice(self):
-        chime.resolve(self.sounds, "notification", "dnd",
+        chime.resolve(self.sounds, "stop", "dnd",
                       {"accent": "uk", "gender": "female"}, project="proj")
-        self.assertEqual(self.asked, [("uk", "female", "proj")])
+        self.assertEqual(self.asked, [("uk", "female", "proj", "stop")])
 
     def test_project_announce_false_opts_out(self):
-        tracks = chime.resolve(self.sounds, "notification", "dnd",
+        tracks = chime.resolve(self.sounds, "stop", "dnd",
                                {"project_announce": False}, project="proj")
-        self.assertEqual(tracks[1].name, "notification_0.wav")
+        self.assertEqual(tracks[1].name, "stop_0.wav")
         self.assertEqual(self.asked, [])
 
     def test_sound_only_mode_still_skips_speech_entirely(self):

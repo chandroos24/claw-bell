@@ -139,9 +139,13 @@ rings the terminal bell rather than going silent.
 ## Naming the project
 
 A chime that says *something* wants you is only half an answer when four
-sessions are running. When the fourth field is present on a `notification`,
-the listener says **"Claude is waiting for you on &lt;project&gt;"** instead of
-the generic shipped phrase.
+sessions are running. When the fourth field is present, the listener names the
+project instead of using the generic shipped phrase:
+
+| Event | Phrase |
+|---|---|
+| `stop` | "Task complete on &lt;project&gt;" |
+| `notification` | "Claude is waiting for you on &lt;project&gt;" |
 
 The project is the session directory's own name, slugified by
 `hooks/project_speech.py` on the host that chimed. Only that slug crosses the
@@ -154,7 +158,7 @@ phrase is therefore synthesized by whatever voice the operating system already
 has — `say` on macOS, SAPI on Windows, espeak on Linux — and cached at
 
 ```
-sounds/speech/projects/<accent>/<gender>/notification_<slug>.wav
+sounds/speech/projects/<accent>/<gender>/<event>_<slug>.wav
 ```
 
 so only the first chime from a given checkout pays for synthesis. The cache
@@ -164,9 +168,6 @@ phone hears the same sentence as the Mac rather than a generic beep.
 Synthesis happens on whichever machine has the speakers, never on both. The
 hook skips it entirely on the SSH path, and the listener primes its voice list
 at startup so the first unseen project is not also the one that waits for it.
-
-`stop` keeps its shipped phrase. Knowing a job finished rarely depends on
-knowing which one, and every extra word is a word you hear all day.
 
 Set `"project_announce": false` to turn the whole thing off. If there is no
 voice on the machine, or synthesis fails, the generic phrase plays — the one

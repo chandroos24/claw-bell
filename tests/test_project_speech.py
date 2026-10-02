@@ -104,11 +104,20 @@ class ProjectFromHook(unittest.TestCase):
 
 
 class Phrase(unittest.TestCase):
-    def test_reads_separators_as_spaces(self):
+    def test_a_finished_turn_says_the_task_is_complete(self):
         self.assertEqual(
-            ps.phrase_for("bells-and-whistles"),
+            ps.phrase_for("bells-and-whistles", "stop"),
+            "Task complete on bells and whistles",
+        )
+
+    def test_a_blocked_turn_says_claude_is_waiting(self):
+        self.assertEqual(
+            ps.phrase_for("bells-and-whistles", "notification"),
             "Claude is waiting for you on bells and whistles",
         )
+
+    def test_an_unknown_event_does_not_crash_the_chime(self):
+        self.assertIn("bells and whistles", ps.phrase_for("bells-and-whistles", "???"))
 
     def test_underscores_and_dots_too(self):
         self.assertEqual(ps.spoken_name("my_app.v2"), "my app v2")
@@ -151,6 +160,14 @@ class Ensure(unittest.TestCase):
             found.relative_to(self.sounds).as_posix(),
             "speech/projects/us/male/notification_myapp.wav",
         )
+
+    def test_each_event_gets_its_own_cache(self):
+        """Two different sentences cannot share one file."""
+        a = ps.ensure(self.sounds, "us", "male", "myapp", "stop")
+        b = ps.ensure(self.sounds, "us", "male", "myapp", "notification")
+        self.assertNotEqual(a, b)
+        self.assertIn("Task complete", self.calls[0][0])
+        self.assertIn("waiting for you", self.calls[1][0])
 
     def test_each_voice_gets_its_own_cache(self):
         a = ps.ensure(self.sounds, "us", "male", "myapp")
@@ -219,10 +236,13 @@ class RealVoice(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_produces_a_playable_wav(self):
-        found = ps.ensure(self.sounds, "us", "male", "bells-and-whistles")
-        self.assertIsNotNone(found, "synthesis produced nothing")
-        with wave.open(str(found)) as handle:
-            self.assertGreater(handle.getnframes(), 0)
+        for event in ("stop", "notification"):
+            with self.subTest(event=event):
+                found = ps.ensure(self.sounds, "us", "male",
+                                  "bells-and-whistles", event)
+                self.assertIsNotNone(found, "synthesis produced nothing")
+                with wave.open(str(found)) as handle:
+                    self.assertGreater(handle.getnframes(), 0)
 
     def test_the_cached_file_is_reused_not_recut(self):
         first = ps.ensure(self.sounds, "us", "male", "bells-and-whistles")

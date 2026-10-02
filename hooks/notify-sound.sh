@@ -230,10 +230,14 @@ fi
 # sounds/speech/projects/, so only the first chime from a checkout pays for it.
 # Deliberately after the SSH branch: on a remote host the speaking happens on
 # the workstation, so synthesizing here would burn a second for nothing.
-# Stop events keep their shipped phrase — it is the waiting that needs a name.
-if [ "$1" != "stop" ] && [ -n "$PROJECT" ] && [ "$MODE" != "sound_only" ] \
+# Both events say it, each in its own words: "Task complete on <project>" when
+# a turn finishes, "Claude is waiting for you on <project>" when input is
+# needed. Which window to go to is the thing the sound alone cannot tell you.
+if [ -n "$PROJECT" ] && [ "$MODE" != "sound_only" ] \
    && [ "$VOICE_STYLE" = "full_sentence" ]; then
+    if [ "$1" = "stop" ]; then PROJECT_EVENT=stop; else PROJECT_EVENT=notification; fi
     PROJECT_WAV=$(python3 "$PROJECT_SPEECH" wav --project "$PROJECT" \
+        --event "$PROJECT_EVENT" \
         --sounds-dir "$SOUNDS_DIR" --accent "$ACCENT" --gender "$GENDER" 2>/dev/null)
     [ -n "$PROJECT_WAV" ] && [ -f "$PROJECT_WAV" ] && SPEECH="$PROJECT_WAV"
 fi
