@@ -62,6 +62,7 @@ print(f'ACCENT={shlex.quote(c.get(\"accent\",\"us\"))}')
 print(f'GENDER={shlex.quote(c.get(\"gender\",\"male\"))}')
 print(f'VOICE_STYLE={shlex.quote(c.get(\"voice_style\",\"full_sentence\"))}')
 print(f'USE_THEMED_PHRASES={shlex.quote(str(c.get(\"use_themed_phrases\",False)).lower())}')
+print(f'PROJECT_ANNOUNCE={shlex.quote(str(c.get(\"project_announce\",True)).lower())}')
 print(f'WSL_POWERSHELL_PATH={shlex.quote(c.get(\"wsl_powershell_path\",\"\"))}')
 print(f'CHIME_PORT={shlex.quote(str(c.get(\"chime_port\",8127)))}')
 print(f'CHIME_LABEL={shlex.quote(c.get(\"chime_label\",\"\"))}')
@@ -72,9 +73,19 @@ ACCENT="${ACCENT:-us}"
 GENDER="${GENDER:-male}"
 VOICE_STYLE="${VOICE_STYLE:-full_sentence}"
 USE_THEMED_PHRASES="${USE_THEMED_PHRASES:-false}"
+PROJECT_ANNOUNCE="${PROJECT_ANNOUNCE:-true}"
 CHIME_PORT="${CHIME_PORT:-8127}"
 
 SOUNDS_DIR="$PLUGIN_ROOT/sounds"
+PROJECT_SPEECH="$PLUGIN_ROOT/hooks/project_speech.py"
+
+# Which project this session is in, as a slug. Cheap — no synthesis here, just
+# the name — because the SSH branch below needs it too, and on that path the
+# speaking happens on the workstation, not on this host.
+PROJECT=""
+if [ "$PROJECT_ANNOUNCE" = "true" ] && [ -f "$PROJECT_SPEECH" ]; then
+    PROJECT=$(printf '%s' "$HOOK_JSON" | python3 "$PROJECT_SPEECH" slug 2>/dev/null)
+fi
 
 # Get TTY for this session and check per-session mute
 MY_TTY=""
@@ -193,18 +204,42 @@ if [ -n "$SSH_CONNECTION" ] && [ "$PLAT" != "wsl" ]; then
     # line is still in flight, and the chime is silently lost.
     # A failed connect or write must still exit non-zero so we fall back to the
     # bell; the reply itself is best-effort, so its status is not checked.
+    #
+    # The project rides along as an optional fourth field. Older listeners
+    # only know three, so a session with no project name sends three — and a
+    # listener that rejects four degrades to the terminal bell, not silence.
+    CHIME_MSG_BODY="${CHIME_EVENT}|${THEME}|${CHIME_LABEL}"
+    [ -n "$PROJECT" ] && CHIME_MSG_BODY="${CHIME_MSG_BODY}|${PROJECT}"
+
     CHIME_SEND='exec 3<>/dev/tcp/127.0.0.1/"$CHIME_PORT" || exit 1
                 printf "%s\n" "$CHIME_MSG" >&3 || exit 1
                 read -t 2 -r _ <&3
                 exec 3>&-
                 exit 0'
-    if CHIME_MSG="${CHIME_EVENT}|${THEME}|${CHIME_LABEL}" CHIME_PORT="$CHIME_PORT" \
+    if CHIME_MSG="$CHIME_MSG_BODY" CHIME_PORT="$CHIME_PORT" \
        $CHIME_TIMEOUT bash -c "$CHIME_SEND" 2>/dev/null; then
         exit 0
     fi
 
     printf '\a'
     exit 0
+fi
+
+# "Claude is waiting for you on <project>" replaces the generic shipped phrase.
+# Synthesized once per project by the OS voice and cached under
+# sounds/speech/projects/, so only the first chime from a checkout pays for it.
+# Deliberately after the SSH branch: on a remote host the speaking happens on
+# the workstation, so synthesizing here would burn a second for nothing.
+# Both events say it, each in its own words: "Task complete on <project>" when
+# a turn finishes, "Claude is waiting for you on <project>" when input is
+# needed. Which window to go to is the thing the sound alone cannot tell you.
+if [ -n "$PROJECT" ] && [ "$MODE" != "sound_only" ] \
+   && [ "$VOICE_STYLE" = "full_sentence" ]; then
+    if [ "$1" = "stop" ]; then PROJECT_EVENT=stop; else PROJECT_EVENT=notification; fi
+    PROJECT_WAV=$(python3 "$PROJECT_SPEECH" wav --project "$PROJECT" \
+        --event "$PROJECT_EVENT" \
+        --sounds-dir "$SOUNDS_DIR" --accent "$ACCENT" --gender "$GENDER" 2>/dev/null)
+    [ -n "$PROJECT_WAV" ] && [ -f "$PROJECT_WAV" ] && SPEECH="$PROJECT_WAV"
 fi
 
 # Pick a random melody WAV from the theme directory

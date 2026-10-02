@@ -40,6 +40,32 @@ have six agents running and zero idea which one just spoke up.
 Voice is optional. The plugin ships pre-generated WAV files and works fine
 without AWS credentials.
 
+### Naming the project
+
+Both chimes say which project they came from, instead of a generic "Job
+completed!" or "Hey! Back to work!":
+
+| Event | Phrase |
+|---|---|
+| Claude finished a turn | "Task complete on &lt;project&gt;" |
+| Claude needs your input | "Claude is waiting for you on &lt;project&gt;" |
+
+The project is the name of the directory the session is running in. Which
+window to go to is the one thing the sound alone cannot tell you, which is the
+whole point of running ten themes.
+
+The shipped WAVs were cut long before your checkout existed, so these two
+sentences are synthesized by the voice your operating system already has
+(`say` on macOS, SAPI on Windows, espeak on Linux) the first time you get a
+chime from a given project. They are cached under `sounds/speech/projects/`,
+so every chime after the first costs nothing. Remote sessions get it too: the
+project name rides along the SSH tunnel and the workstation does the speaking.
+
+The project phrase replaces whichever phrase you picked, themed ones included,
+so if you would rather keep "Wake up, samurai", set `"project_announce":
+false`. If there is no voice available on the machine, the generic phrase
+plays instead.
+
 ### Themed phrases
 
 The Cyberpunk and D&D themes include themed speech phrases — "Flatline
@@ -155,6 +181,7 @@ Edit `config.json` directly if you prefer:
   "accent": "us",
   "gender": "male",
   "voice_style": "full_sentence",
+  "project_announce": true,
   "theme": "cyberpunk",
   "use_themed_phrases": true
 }
@@ -167,6 +194,10 @@ Edit `config.json` directly if you prefer:
 **gender** — `male` or `female` (used for standard phrases; ignored when `use_themed_phrases` is true)
 
 **voice_style** — `full_sentence` or `number_only`
+
+**project_announce** — `true` (default) to name the project in both chimes
+("Task complete on &lt;project&gt;", "Claude is waiting for you on
+&lt;project&gt;"), `false` for the generic shipped phrases
 
 **theme** — one of: `videogame`, `disney`, `anime`, `movies`, `90s_rock`,
 `classical`, `beeps`, `chirps`, `cyberpunk`, `dnd`
@@ -204,7 +235,7 @@ you already have open, and your workstation plays the sound. No audio crosses
 the wire, and nothing listens on a public interface.
 
 ```
-server: hook ──"stop|dnd|s1"──> 127.0.0.1:8127 ══tunnel══> workstation: listener ──> 🔊
+server: hook ──"notification|dnd|s1|myapp"──> 127.0.0.1:8127 ══tunnel══> workstation: listener ──> 🔊
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the full design.

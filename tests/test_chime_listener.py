@@ -43,14 +43,32 @@ class ParseMessage(unittest.TestCase):
     def test_accepts_a_well_formed_line(self):
         self.assertEqual(
             chime.parse_message("stop|dnd|s1\n", self.THEMES),
-            ("stop", "dnd", "s1"),
+            ("stop", "dnd", "s1", None),
         )
 
     def test_accepts_notification_event(self):
         self.assertEqual(
             chime.parse_message("notification|classical|s2\n", self.THEMES),
-            ("notification", "classical", "s2"),
+            ("notification", "classical", "s2", None),
         )
+
+    def test_accepts_an_optional_project_field(self):
+        self.assertEqual(
+            chime.parse_message("notification|dnd|s1|bells-and-whistles\n", self.THEMES),
+            ("notification", "dnd", "s1", "bells-and-whistles"),
+        )
+
+    def test_rejects_shell_metacharacters_in_project(self):
+        with self.assertRaises(chime.ChimeError):
+            chime.parse_message("stop|dnd|s1|x; rm -rf /\n", self.THEMES)
+
+    def test_rejects_path_traversal_in_project(self):
+        with self.assertRaises(chime.ChimeError):
+            chime.parse_message("stop|dnd|s1|../../etc/passwd\n", self.THEMES)
+
+    def test_rejects_an_empty_project_field(self):
+        with self.assertRaises(chime.ChimeError):
+            chime.parse_message("stop|dnd|s1|\n", self.THEMES)
 
     def test_rejects_path_traversal_in_theme(self):
         with self.assertRaises(chime.ChimeError):
@@ -73,7 +91,7 @@ class ParseMessage(unittest.TestCase):
             chime.parse_message("stop|dnd|s1; rm -rf /\n", self.THEMES)
 
     def test_rejects_wrong_field_count(self):
-        for line in ("stop|dnd\n", "stop|dnd|s1|extra\n", "stop\n"):
+        for line in ("stop|dnd\n", "stop|dnd|s1|a|b\n", "stop\n"):
             with self.subTest(line=line), self.assertRaises(chime.ChimeError):
                 chime.parse_message(line, self.THEMES)
 
@@ -144,6 +162,85 @@ class Resolve(unittest.TestCase):
         )
         self.assertEqual(len(tracks), 1)
         self.assertEqual(tracks[0].parent.name, "dnd")
+
+
+class ProjectSpeech(unittest.TestCase):
+    """A notification that knows its project says the project's name."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.sounds = build_sounds(self.tmp.name)
+        self.asked = []
+
+        cache = Path(self.sounds, "speech", "projects", "us", "male")
+        cache.mkdir(parents=True)
+
+        def fake_ensure(sounds_dir, accent, gender, slug, event="notification",
+                        log=None):
+            """Stands in for the OS voice: records the ask, hands back a file."""
+            self.asked.append((accent, gender, slug, event))
+            if slug == "nosynth":
+                return None
+            wav = Path(sounds_dir, "speech", "projects", accent, gender,
+                       f"{event}_{slug}.wav")
+            wav.parent.mkdir(parents=True, exist_ok=True)
+            wav.write_bytes(b"RIFF")
+            return wav
+
+        self.real_ensure = chime.project_speech.ensure
+        chime.project_speech.ensure = fake_ensure
+
+    def tearDown(self):
+        chime.project_speech.ensure = self.real_ensure
+        self.tmp.cleanup()
+
+    def test_both_events_speak_the_project(self):
+        """Each in its own words, so "complete" and "waiting" stay distinct."""
+        for event in ("notification", "stop"):
+            with self.subTest(event=event):
+                tracks = chime.resolve(self.sounds, event, "dnd", {},
+                                       project="bells-and-whistles")
+                self.assertEqual(tracks[1].name,
+                                 f"{event}_bells-and-whistles.wav")
+
+    def test_project_wav_lives_under_the_sounds_tree(self):
+        """chime_web.py only serves sounds/, so the phone needs it in there."""
+        tracks = chime.resolve(self.sounds, "notification", "dnd", {},
+                               project="bells-and-whistles")
+        self.assertTrue(tracks[1].is_relative_to(Path(self.sounds)))
+
+    def test_each_event_asks_for_its_own_phrase(self):
+        chime.resolve(self.sounds, "notification", "dnd", {}, project="proj")
+        chime.resolve(self.sounds, "stop", "dnd", {}, project="proj")
+        self.assertEqual(self.asked, [("us", "male", "proj", "notification"),
+                                      ("us", "male", "proj", "stop")])
+
+    def test_no_project_keeps_the_shipped_phrase(self):
+        tracks = chime.resolve(self.sounds, "notification", "dnd", {})
+        self.assertEqual(tracks[1].name, "notification_0.wav")
+        self.assertEqual(self.asked, [])
+
+    def test_failed_synthesis_falls_back_rather_than_going_silent(self):
+        tracks = chime.resolve(self.sounds, "notification", "dnd", {},
+                               project="nosynth")
+        self.assertEqual(tracks[1].name, "notification_0.wav")
+
+    def test_honours_the_configured_voice(self):
+        chime.resolve(self.sounds, "stop", "dnd",
+                      {"accent": "uk", "gender": "female"}, project="proj")
+        self.assertEqual(self.asked, [("uk", "female", "proj", "stop")])
+
+    def test_project_announce_false_opts_out(self):
+        tracks = chime.resolve(self.sounds, "stop", "dnd",
+                               {"project_announce": False}, project="proj")
+        self.assertEqual(tracks[1].name, "stop_0.wav")
+        self.assertEqual(self.asked, [])
+
+    def test_sound_only_mode_still_skips_speech_entirely(self):
+        tracks = chime.resolve(self.sounds, "notification", "dnd",
+                               {"mode": "sound_only"}, project="proj")
+        self.assertEqual(len(tracks), 1)
+        self.assertEqual(self.asked, [])
 
 
 class LoadConfig(unittest.TestCase):
@@ -223,6 +320,16 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(self.player.played, [])
         self.assertTrue(any("rejected" in line for line in self.logs))
 
+    def test_four_field_message_is_accepted(self):
+        """Protocol acceptance only — a stub voice keeps the suite off `say`."""
+        real = chime.project_speech.ensure
+        chime.project_speech.ensure = lambda *a, **k: None
+        try:
+            self.send("notification|dnd|s1|bells-and-whistles\n")
+        finally:
+            chime.project_speech.ensure = real
+        self.assertEqual(len(self.player.played), 2)
+
     def test_garbage_does_not_kill_the_server(self):
         self.send("total garbage\n")
         self.send("stop|dnd|s1\n")
@@ -282,6 +389,17 @@ class BuildEvent(unittest.TestCase):
         self.assertEqual(ev["mac_active"], False)
         self.assertEqual(ev["id"], 7)
         self.assertEqual(ev["ts"], "2026-09-17T14:00:00Z")
+
+    def test_carries_the_project_to_the_browser(self):
+        tracks = chime.resolve(self.sounds, "stop", "dnd", {})
+        ev = chime.build_event("notification", "dnd", "s1", tracks, self.sounds,
+                               True, 1, "t", "bells-and-whistles")
+        self.assertEqual(ev["project"], "bells-and-whistles")
+
+    def test_project_is_none_when_the_sender_did_not_send_one(self):
+        tracks = chime.resolve(self.sounds, "stop", "dnd", {})
+        ev = chime.build_event("stop", "dnd", "s1", tracks, self.sounds, True, 1, "t")
+        self.assertIsNone(ev["project"])
 
     def test_speech_is_none_when_only_a_melody_played(self):
         tracks = chime.resolve(self.sounds, "stop", "dnd", {"mode": "sound_only"})
