@@ -5,3 +5,6 @@ __pycache__/
 # Per-project phrases, cut by the local voice on first use and
 # regenerated for free if an upgrade wipes them.
 sounds/speech/projects/
+
+# Local-only notes for Claude
+.claude.local.md
